@@ -10,6 +10,7 @@ mod audio;
 mod audio_cues;
 mod audio_load;
 mod audio_drums;
+mod audio_ids;
 mod audio_mix;
 mod audio_source;
 mod audio_space;

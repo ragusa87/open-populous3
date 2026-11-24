@@ -20,32 +20,255 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// A family of sounds, one of the original's sound ids (sound.md "Sound ids"): its variants (`chop1`..`chop5`)
-/// are interchangeable. Filled in as sounds are wired.
+/// A family of sounds, one of the original's sound ids (sound.md "Sound id table", `id`): its variants (`chop1`..
+/// `chop5`) are interchangeable. Named for what plays it; crowd sizes are 1, 2, 3 and 4 or more.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SoundCue {
-    /// A menu entry picked.
+    // The interface.
+    /// A menu entry picked (`confirm`).
     Click,
     /// An intro flyby starts.
     FlybyStart,
     /// The player cancels a flyby.
     FlybyCancel,
-    /// Followers (braves, warriors, firewarriors) selected, by crowd size (1, 2, 3 or more).
+    // Selection and order voices.
+    /// Followers (braves, warriors, firewarriors, wildmen) selected, by crowd size.
     FollowerBow(u8),
-    /// Spies selected, one or several.
     SpyBow(u8),
-    PreacherBow,
+    PreacherBow(u8),
     ShamanSelect,
-    /// Followers ordered.
     FollowerOk,
-    /// Spies ordered, one or several.
     SpyOk(u8),
-    PreacherOk,
+    PreacherOk(u8),
     ShamanYes,
-    /// A reincarnation site's stone rising out of the ground (the original's sound 0x9F).
+    // People.
+    /// A death cry (not a shaman's).
+    Death,
+    /// The player's shaman dies.
+    ShamanDie,
+    /// Another tribe's shaman dies.
+    EnemyShamanDie,
+    /// A ghost vanishes.
+    GhostDie,
+    /// The drowning cry.
+    Drown,
+    /// Thrown into the air rising fast (not a shaman).
+    IntoAir,
+    /// Sucked into a whirlwind (not a shaman).
+    IntoWind,
+    /// The player's shaman thrown or sucked up.
+    ShamanScream,
+    /// Another tribe's shaman thrown or sucked up.
+    EnemyShamanScream,
+    /// A thrown person lands hard and lives (not a shaman, not a wildman).
+    Land,
+    /// A thrown shaman lands hard.
+    ShamanLand,
+    /// The player's shaman casts: her shout for the spell.
+    CastShout(game_core::spell_book::SpellKind),
+    /// Another tribe's shaman casts.
+    EnemyCastShout(game_core::spell_book::SpellKind),
+    /// A person on fire screaming.
+    OnFire,
+    /// A wildman turned into a brave.
+    Converted,
+    /// Someone turns invisible.
+    Invisible,
+    /// Someone visible again.
+    InvisibleOff,
+    /// A wildman muttering.
+    Mutter,
+    // Work.
+    /// A brave chopping a tree, hacking at a building.
+    Chop,
+    /// A brave picking up wood.
+    ChopPickUp,
+    /// A brave hammering at a building.
+    Hammer,
+    /// A brave levelling a foundation.
+    Stomp,
+    /// Eating, drinking: two ids each, half the time one, half the other.
+    Eat,
+    WildEat,
+    Drink,
+    WildDrink,
+    /// The completion bell.
+    BuildingDone,
+    // Spells and their effects.
+    /// A shot launched: Blast's fireball, a firewarrior's bolt.
+    Whoosh,
+    /// An explosion.
+    BlastImpact,
+    /// Lightning's thunder.
+    Thunder,
+    /// A splash on the sea.
+    Splash,
+    /// The whirlwind's wind, a variety loop.
+    Wind,
+    /// The swarm, a variety loop.
+    Swarm,
+    /// The swamp bubbling, a variety loop.
+    Swamp,
+    /// Erosion's rumble, a repeat loop.
+    ErodeRumble,
+    /// Earthquake's rumble, a repeat loop, and its crack halfway.
+    QuakeRumble,
+    QuakeCrack,
+    /// The volcano's rumble, a repeat loop, and the cone starting to rise.
+    VolcanoRumble,
+    VolcanoRise,
+    /// A lava flow, a repeat loop.
+    Lava,
+    /// Fire on the ground, a variety loop, and where it catches.
+    GroundFire,
+    FireCatches,
+    /// A building burning, a variety loop.
+    BuildingFire,
+    /// A whirlwind or an earthquake tearing wood off a building.
+    WoodCrack,
+    /// A whirlwind snapping a branch off a tree.
+    BranchSnap,
+    /// Land Bridge cast: two ids layered.
+    BridgeCast,
+    BridgeCast2,
+    HypnotismCast,
+    GhostArmyCast,
+    ConvertCast,
+    FlattenCast,
+    /// The Angel of Death: cast, its meteor launched, the meteor landing.
+    AngelCast,
+    AngelFall,
+    AngelLand,
+    /// A spy throws a firebrand.
+    Throw,
+    // Vehicles.
+    BoatRide,
+    BalloonRide,
+    BoatExplode,
+    BalloonPop,
+    // Scenery and rituals.
+    /// A reincarnation site's stone rising out of the ground.
     StoneRise,
-    /// A stone head's nod.
+    /// A stone head talking.
     StoneHeadNod,
+    // Ambience.
+    /// The battle crowd, a repeat loop over many fights.
+    BattleCrowd,
+    /// The magical shield's hum.
+    ShieldHum,
+}
+
+impl SoundCue {
+    /// The original's sound id (sound.md "Sound id table").
+    pub fn id(self) -> u8 {
+        let shout = |base: u8, spell| match spell_type(spell) {
+            0 => 0,
+            t => base + t,
+        };
+        let crowd = |n: u8, ids: [u8; 4]| ids[(n.clamp(1, 4) - 1) as usize];
+        match self {
+            SoundCue::Click => 0x6A,
+            SoundCue::FlybyStart => 0x6F,
+            SoundCue::FlybyCancel => 0x6E,
+            SoundCue::FollowerBow(n) => crowd(n, [0x58, 0x43, 0x44, 0x45]),
+            SoundCue::SpyBow(n) => crowd(n, [0x56, 0x46, 0x47, 0x48]),
+            SoundCue::PreacherBow(n) => crowd(n, [0x57, 0x49, 0x4A, 0x4B]),
+            SoundCue::ShamanSelect => 0x18,
+            SoundCue::FollowerOk => 0x37,
+            SoundCue::SpyOk(n) => crowd(n, [0x3B, 0x3C, 0x3D, 0x3E]),
+            SoundCue::PreacherOk(n) => crowd(n, [0x3F, 0x40, 0x41, 0x42]),
+            SoundCue::ShamanYes => 0x19,
+            SoundCue::Death => 0x10,
+            SoundCue::ShamanDie => 0x0F,
+            SoundCue::EnemyShamanDie => 0x88,
+            SoundCue::GhostDie => 0x22,
+            SoundCue::Drown => 0x11,
+            SoundCue::IntoAir => 0xC4,
+            SoundCue::IntoWind => 0xD2,
+            SoundCue::ShamanScream => 0x1A,
+            SoundCue::EnemyShamanScream => 0x89,
+            SoundCue::Land => 0x09,
+            SoundCue::ShamanLand => 0x1B,
+            // A spell with no type of its own (past armageddon) shouts nothing: id 0, silent.
+            SoundCue::CastShout(spell) => shout(0x74, spell),
+            SoundCue::EnemyCastShout(spell) => shout(0x8A, spell),
+            SoundCue::OnFire => 0x51,
+            SoundCue::Converted => 0x05,
+            SoundCue::Invisible => 0x31,
+            SoundCue::InvisibleOff => 0x35,
+            SoundCue::Mutter => 0x16,
+            SoundCue::Chop => 0x01,
+            SoundCue::ChopPickUp => 0x0A,
+            SoundCue::Hammer => 0x14,
+            SoundCue::Stomp => 0x02,
+            SoundCue::Eat => 0x03,
+            SoundCue::WildEat => 0xBE,
+            SoundCue::Drink => 0x04,
+            SoundCue::WildDrink => 0xBF,
+            SoundCue::BuildingDone => 0xD7,
+            SoundCue::Whoosh => 0xA1,
+            SoundCue::BlastImpact => 0xB2,
+            SoundCue::Thunder => 0xA2,
+            SoundCue::Splash => 0x2C,
+            SoundCue::Wind => 0xA3,
+            SoundCue::Swarm => 0xA4,
+            SoundCue::Swamp => 0xAA,
+            SoundCue::ErodeRumble => 0xA9,
+            SoundCue::QuakeRumble => 0xAD,
+            SoundCue::QuakeCrack => 0x15,
+            SoundCue::VolcanoRumble => 0xAF,
+            SoundCue::VolcanoRise => 0xB0,
+            SoundCue::Lava => 0xB5,
+            SoundCue::GroundFire => 0x06,
+            SoundCue::FireCatches => 0xB6,
+            SoundCue::BuildingFire => 0x53,
+            SoundCue::WoodCrack => 0x12,
+            SoundCue::BranchSnap => 0xD4,
+            SoundCue::BridgeCast => 0x29,
+            SoundCue::BridgeCast2 => 0xAB,
+            SoundCue::HypnotismCast => 0x2A,
+            SoundCue::GhostArmyCast => 0xA8,
+            SoundCue::ConvertCast => 0xB4,
+            SoundCue::FlattenCast => 0xAE,
+            SoundCue::AngelCast => 0xAC,
+            SoundCue::AngelFall => 0xD9,
+            SoundCue::AngelLand => 0xDA,
+            SoundCue::Throw => 0x36,
+            SoundCue::BoatRide => 0x4F,
+            SoundCue::BalloonRide => 0x4E,
+            SoundCue::BoatExplode => 0x4D,
+            SoundCue::BalloonPop => 0x4C,
+            SoundCue::StoneRise => 0x9F,
+            SoundCue::StoneHeadNod => 0xC1,
+            SoundCue::BattleCrowd => 0x6C,
+            SoundCue::ShieldHum => 0xC3,
+        }
+    }
+}
+
+/// The original's spell type, for the cast shouts (sound.md "Sound id table"); 0 for spells past armageddon.
+pub fn spell_type(spell: game_core::spell_book::SpellKind) -> u8 {
+    use game_core::spell_book::SpellKind::*;
+    match spell {
+        Blast => 2,
+        Lightning => 3,
+        Whirlwind => 4,
+        Swarm => 5,
+        Invisibility => 6,
+        Hypnotism => 7,
+        Firestorm => 8,
+        GhostArmy => 9,
+        Erosion => 10,
+        Swamp => 11,
+        LandBridge => 12,
+        AngelOfDeath => 13,
+        Earthquake => 14,
+        Flatten => 15,
+        Volcano => 16,
+        Convert => 17,
+        Armageddon => 18,
+        MagicalShield | Teleport | Bloodlust => 0,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

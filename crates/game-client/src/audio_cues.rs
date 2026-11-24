@@ -24,6 +24,10 @@ struct Crowd {
     shaman: bool,
 }
 
+fn size(n: usize) -> u8 {
+    n.min(4) as u8
+}
+
 fn crowd(kinds: &[UnitKind]) -> Crowd {
     let mut c = Crowd::default();
     for k in kinds {
@@ -31,28 +35,29 @@ fn crowd(kinds: &[UnitKind]) -> Crowd {
             UnitKind::Spy => c.spies += 1,
             UnitKind::Preacher => c.preachers += 1,
             UnitKind::Shaman => c.shaman = true,
-            UnitKind::Brave | UnitKind::Warrior | UnitKind::Firewarrior => c.followers += 1,
-            UnitKind::Wildman | UnitKind::AngelOfDeath => {}
+            UnitKind::Brave | UnitKind::Warrior | UnitKind::Firewarrior | UnitKind::Wildman => c.followers += 1,
+            UnitKind::AngelOfDeath => {}
         }
     }
     c
 }
 
-/// What a fresh selection says, layered: spies, preachers, the shaman, other followers, each by its crowd size.
+/// What a fresh selection says, layered: spies, preachers, the shaman, other followers, each by its crowd size
+/// (1, 2, 3, 4 or more: sound.md "Sound id table").
 pub fn select_lines(kinds: &[UnitKind]) -> Vec<SoundCue> {
     let c = crowd(kinds);
     let mut lines = Vec::new();
     if c.spies > 0 {
-        lines.push(SoundCue::SpyBow(c.spies.min(2) as u8));
+        lines.push(SoundCue::SpyBow(size(c.spies)));
     }
     if c.preachers > 0 {
-        lines.push(SoundCue::PreacherBow);
+        lines.push(SoundCue::PreacherBow(size(c.preachers)));
     }
     if c.shaman {
         lines.push(SoundCue::ShamanSelect);
     }
     if c.followers > 0 {
-        lines.push(SoundCue::FollowerBow(c.followers.min(3) as u8));
+        lines.push(SoundCue::FollowerBow(size(c.followers)));
     }
     lines
 }
@@ -68,10 +73,10 @@ pub fn order_lines(kinds: &[UnitKind]) -> Vec<SoundCue> {
         lines.push(SoundCue::FollowerOk);
     }
     if c.spies > 0 {
-        lines.push(SoundCue::SpyOk(c.spies.min(2) as u8));
+        lines.push(SoundCue::SpyOk(size(c.spies)));
     }
     if c.preachers > 0 {
-        lines.push(SoundCue::PreacherOk);
+        lines.push(SoundCue::PreacherOk(size(c.preachers)));
     }
     lines
 }
@@ -205,24 +210,25 @@ mod tests {
     fn one_unit_bows_with_its_own_line() {
         assert_eq!(select_lines(&[Brave]), vec![SoundCue::FollowerBow(1)]);
         assert_eq!(select_lines(&[Spy]), vec![SoundCue::SpyBow(1)]);
-        assert_eq!(select_lines(&[Preacher]), vec![SoundCue::PreacherBow]);
+        assert_eq!(select_lines(&[Preacher]), vec![SoundCue::PreacherBow(1)]);
         assert_eq!(select_lines(&[Shaman]), vec![SoundCue::ShamanSelect]);
     }
 
     #[test]
     fn a_group_layers_one_line_per_kind_by_crowd_size() {
         assert_eq!(select_lines(&[Brave, Warrior]), vec![SoundCue::FollowerBow(2)]);
-        assert_eq!(select_lines(&[Brave, Warrior, Firewarrior, Brave, Brave]), vec![SoundCue::FollowerBow(3)]);
+        assert_eq!(select_lines(&[Brave, Warrior, Firewarrior]), vec![SoundCue::FollowerBow(3)]);
+        assert_eq!(select_lines(&[Brave, Warrior, Firewarrior, Brave, Wildman]), vec![SoundCue::FollowerBow(4)]);
         assert_eq!(
             select_lines(&[Brave, Spy, Spy, Spy, Shaman, Preacher]),
-            vec![SoundCue::SpyBow(2), SoundCue::PreacherBow, SoundCue::ShamanSelect, SoundCue::FollowerBow(1)]
+            vec![SoundCue::SpyBow(3), SoundCue::PreacherBow(1), SoundCue::ShamanSelect, SoundCue::FollowerBow(1)]
         );
         assert!(select_lines(&[]).is_empty());
     }
 
     #[test]
     fn an_order_gets_the_shaman_s_yes_and_the_others_ok() {
-        assert_eq!(order_lines(&[Shaman, Brave, Warrior, Spy, Preacher]), vec![SoundCue::ShamanYes, SoundCue::FollowerOk, SoundCue::SpyOk(1), SoundCue::PreacherOk]);
+        assert_eq!(order_lines(&[Shaman, Brave, Warrior, Spy, Preacher]), vec![SoundCue::ShamanYes, SoundCue::FollowerOk, SoundCue::SpyOk(1), SoundCue::PreacherOk(1)]);
         assert_eq!(order_lines(&[Spy, Spy]), vec![SoundCue::SpyOk(2)]);
     }
 
