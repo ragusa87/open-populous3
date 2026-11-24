@@ -175,7 +175,7 @@ pub struct Family {
     pub clips: Vec<SoundClip>,
 }
 
-/// What can be played. Empty until the sound loaders fill it (TODO.md "Sound").
+/// What can be played: filled from the install (`audio_load`), empty with `--no-original`.
 #[derive(Resource, Default, Debug)]
 pub struct SoundLibrary {
     pub sounds: HashMap<SoundCue, Family>,
@@ -501,6 +501,8 @@ const SINK_WAIT: u32 = 120;
 pub struct SoundPlugin {
     pub debug: bool,
     pub device_muted: bool,
+    /// The install's `Sound` folder; None with `--no-original`.
+    pub original_dir: Option<std::path::PathBuf>,
 }
 
 impl Plugin for SoundPlugin {
@@ -510,7 +512,7 @@ impl Plugin for SoundPlugin {
         }
         app.insert_resource(AudioDebug(self.debug))
             .insert_resource(DeviceMuted(self.device_muted))
-            .init_resource::<SoundLibrary>()
+            .insert_resource(self.original_dir.as_deref().map(crate::audio_load::load_original).unwrap_or_default())
             .init_resource::<ListenerState>()
             .init_resource::<CurrentMusic>()
             .init_resource::<Drums>()
@@ -1017,7 +1019,7 @@ mod tests {
 
     fn app(device: bool, lib: SoundLibrary) -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default())).add_plugins(SoundPlugin { debug: false, device_muted: false });
+        app.add_plugins((MinimalPlugins, AssetPlugin::default())).add_plugins(SoundPlugin { debug: false, device_muted: false, original_dir: None });
         if device {
             app.insert_resource(AudioOut).init_asset::<PannedSound>();
         }

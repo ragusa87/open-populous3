@@ -5,7 +5,8 @@ edition = "2024"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-bevy = "0.19"
+bevy = { version = "0.19", features = ["wav", "mp3"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp2"] }
 gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
 half = "2"
 dirs = "6"
