@@ -30,11 +30,12 @@ pub const CUES: &[SoundCue] = &[
     SoundCue::SpyOk(2),
     SoundCue::PreacherOk,
     SoundCue::ShamanYes,
+    SoundCue::StoneRise,
 ];
 
 /// The `Soundd2` name family a cue plays. A guess (ours) from the entry names: the original picks entries through
 /// its sound id table, not in docs/ yet (TODO.md "Sound"); the voices follow sound.md "Voices", the menu click and
-/// the flyby sounds are picked by name alone.
+/// the flyby and stone sounds are picked by name alone.
 pub fn family_name(cue: SoundCue) -> &'static str {
     match cue {
         SoundCue::Click => "confirm",
@@ -52,6 +53,7 @@ pub fn family_name(cue: SoundCue) -> &'static str {
         SoundCue::SpyOk(_) => "v_spy_ok2_",
         SoundCue::PreacherOk => "v_pre_ok",
         SoundCue::ShamanYes => "Sv_yes",
+        SoundCue::StoneRise => "rokrise",
     }
 }
 

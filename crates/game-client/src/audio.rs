@@ -42,6 +42,8 @@ pub enum SoundCue {
     SpyOk(u8),
     PreacherOk,
     ShamanYes,
+    /// A reincarnation site's stone rising out of the ground (the original's sound 0x9F).
+    StoneRise,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

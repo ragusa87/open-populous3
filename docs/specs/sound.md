@@ -153,7 +153,8 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
   (`audio_load::family_name`: the name, then digits only), at full volume and priority 0. Wired (`audio_cues.rs`):
   the selection's bow lines and the order answers as in "Voices" (crowd sizes the bank lacks fall back to the
   largest it has: followers 1/2/3, spies 1/2), the flyby's start (`Zoom_in`) and cancel (`Zoom_out`), the menu
-  click (`confirm`) - those three picked by name alone.
+  click (`confirm`) and a reincarnation site's stones rising (`rokrise`, at the stone, every second stone as
+  "Pillars" [exe] says for sound 0x9F) - those four picked by name alone.
 - Not done yet: the other SFX (casting shouts, deaths, work sounds, spells, ambience), the per-id volume, priority
   and while-paused flag, the fight bank's alternative ranges, CC0 sounds for `--no-original`, the clips' own loop points (`fire`, `warloop`...), work sounds waiting for an animation
   frame, ambience layers, reverb, game events turned into cues (the fight flag for the intensity).

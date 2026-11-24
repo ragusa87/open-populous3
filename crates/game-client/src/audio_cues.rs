@@ -1,11 +1,14 @@
 //! Game moments turned into sounds (sound.md "Voices"): the selected people bowing, the ordered ones answering, a
-//! flyby starting or cancelled. Pure line choices, thin systems.
+//! flyby starting or cancelled, a reincarnation site's stones rising. Pure choices, thin systems.
 
 use crate::audio::{PlaySound, SoundCue};
 use crate::units::selection::Selection;
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::ai_script::ActiveFlyby;
+use game_core::time::Tick;
+use game_core::tribes::TribeId;
+use std::collections::BTreeMap;
 use game_core::unit::{UnitId, UnitKind};
 
 /// The player gave an order to the selection.
@@ -102,6 +105,44 @@ pub fn flyby_cue(before: FlybyPhase, now: FlybyPhase) -> Option<SoundCue> {
     }
 }
 
+/// Pillar slots of a site built since `before` (each slot's build tick, `ReincarnationSite::pillar_built`).
+pub fn risen_slots(before: &[Option<Tick>], now: &[Option<Tick>]) -> Vec<u8> {
+    now.iter().zip(before).enumerate().filter(|(_, (n, b))| n.is_some() && b.is_none()).map(|(i, _)| i as u8).collect()
+}
+
+/// Which risen stones sound: every second one, counted across every site ("Pillars" [exe]: a global counter's odd
+/// values; that the first one counts as odd is ours). `count` goes on from one call to the next.
+pub fn sounding(count: &mut u32, risen: usize) -> Vec<bool> {
+    (0..risen)
+        .map(|_| {
+            *count += 1;
+            *count % 2 == 1
+        })
+        .collect()
+}
+
+#[derive(Default)]
+struct StoneWatch {
+    built: BTreeMap<TribeId, Vec<Option<Tick>>>,
+    count: u32,
+}
+
+fn stone_sounds(map: Res<CurrentMap>, mut watch: Local<StoneWatch>, mut sounds: MessageWriter<PlaySound>) {
+    let watch = &mut *watch;
+    for site in &map.0.sites {
+        let now: Vec<Option<Tick>> = (0..8).map(|slot| site.pillar_built(slot)).collect();
+        let before = watch.built.insert(site.owner, now.clone());
+        let Some(before) = before else { continue };
+        let risen = risen_slots(&before, &now);
+        let parts = crate::sites::site_parts(site);
+        for (slot, sound) in risen.iter().zip(sounding(&mut watch.count, risen.len())) {
+            if let (true, Some(part)) = (sound, parts.get(*slot as usize)) {
+                sounds.write(PlaySound::at(SoundCue::StoneRise, part.ground.at));
+            }
+        }
+    }
+}
+
 fn kinds(map: &CurrentMap, ids: &[UnitId]) -> Vec<UnitKind> {
     ids.iter().filter_map(|&id| map.0.unit(id)).map(|u| u.kind).collect()
 }
@@ -134,7 +175,7 @@ pub struct AudioCuesPlugin;
 
 impl Plugin for AudioCuesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Ordered>().add_systems(Update, (selection_voices, order_voices, flyby_sounds).in_set(crate::menu::Gameplay));
+        app.add_message::<Ordered>().add_systems(Update, (selection_voices, order_voices, flyby_sounds, stone_sounds).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -176,6 +217,20 @@ mod tests {
         assert!(newly_selected(&[a], &[a, b]));
         assert!(!newly_selected(&[a, b], &[a]), "one died");
         assert!(!newly_selected(&[a], &[]));
+    }
+
+    #[test]
+    fn a_stone_sounds_when_its_slot_gets_built() {
+        let t = Some(Tick::ZERO);
+        assert_eq!(risen_slots(&[None, None, t], &[t, None, t]), vec![0]);
+        assert!(risen_slots(&[t, t], &[t, t]).is_empty());
+    }
+
+    #[test]
+    fn every_second_stone_sounds_across_calls() {
+        let mut count = 0;
+        assert_eq!(sounding(&mut count, 3), vec![true, false, true]);
+        assert_eq!(sounding(&mut count, 2), vec![false, true]);
     }
 
     #[test]
