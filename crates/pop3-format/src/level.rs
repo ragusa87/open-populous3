@@ -39,6 +39,8 @@ pub const GENERAL_TRIGGER: u8 = 6;
 /// Effect models that store a target (land bridge, lightning bolt).
 pub const EFFECT_LIGHTNING_BOLT: u8 = 17;
 pub const EFFECT_LAND_BRIDGE: u8 = 24;
+/// "Reveal fog area" (pop3-rev-analysis.md "Fog of war").
+pub const EFFECT_REVEAL_FOG: u8 = 81;
 /// A full turn in thing angles.
 pub const FULL_TURN: u16 = 2048;
 /// Trigger target slots per trigger.

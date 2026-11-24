@@ -278,6 +278,8 @@ pub enum Reward {
     OneShot(SpellKind),
     /// Mana (no mana in the simulation yet: only logged).
     Mana(u32),
+    /// Effect 81 "reveal fog area" on that cell (`fog::Fog::reveal_area`).
+    RevealFog { cell: (i32, i32) },
     /// A trigger target not handled yet (an effect, a revealed thing, a vehicle...): its thing kind
     /// and model, only logged.
     Unhandled { kind: u8, model: u8 },

@@ -212,6 +212,7 @@ fn reward_name(reward: Reward) -> String {
         Reward::Building(kind) => kind.name(),
         Reward::OneShot(kind) => format!("{} (one cast)", kind.name()),
         Reward::Mana(n) => format!("{n} mana"),
+        Reward::RevealFog { .. } => "Unexplored land revealed".to_string(),
         Reward::Unhandled { .. } => "Something unknown".to_string(),
     }
 }

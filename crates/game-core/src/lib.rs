@@ -31,6 +31,7 @@ pub mod effect;
 pub mod erode;
 pub mod event;
 pub mod flatten;
+pub mod fog;
 pub mod enter;
 pub mod fire;
 pub mod firebolt;

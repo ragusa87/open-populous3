@@ -140,6 +140,9 @@ pub fn gift(target: &Thing) -> Reward {
         },
         ThingData::Discovery(d) if d.kind == KIND_BUILDING => Reward::Building(BuildingKind::from_model(d.model)),
         ThingData::Discovery(d) if d.kind == DISCOVERY_MANA => Reward::Mana(d.mana.max(0) as u32),
+        _ if target.kind == pop3_format::level::KIND_EFFECT && target.model == pop3_format::level::EFFECT_REVEAL_FOG => {
+            Reward::RevealFog { cell: ((target.x as u32 / WORLD_UNITS_PER_CELL) as i32, (target.z as u32 / WORLD_UNITS_PER_CELL) as i32) }
+        }
         _ => Reward::Unhandled { kind: target.kind, model: target.model },
     }
 }

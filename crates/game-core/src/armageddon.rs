@@ -270,6 +270,9 @@ impl GameMap {
     /// and the match, which then teleports everyone in. The ground it changed.
     pub(crate) fn start_armageddon(&mut self, at: (u16, u16)) -> crate::terrain::DirtyRect {
         let at = arena_centre(at);
+        if let Some(fog) = self.fog.as_mut() {
+            fog.reveal_all(((at.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (at.1 as u32 / WORLD_UNITS_PER_CELL) as i32), crate::fog::ARMAGEDDON_SIGHT);
+        }
         self.revive_shamans();
         let tribes: Vec<TribeId> = self.sites.iter().map(|s| s.owner).collect();
         tribes.into_iter().for_each(|t| self.remove_reincarnation(t));

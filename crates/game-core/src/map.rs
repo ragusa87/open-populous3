@@ -77,6 +77,8 @@ pub struct GameMap {
     /// The player is a god (level flag "shaman omni", level 25): spells starting at the caster start at the
     /// view instead (`Spell::LandBridge::from` as aimed), and casts have no range.
     pub shaman_omni: bool,
+    /// Each human tribe's explored land on a level with fog of war (`fog.rs`, level flag 0x01), None elsewhere.
+    pub fog: Option<crate::fog::Fog>,
     /// Spell effects going on (`effect::Effect`), in the order they were added.
     pub effects: Registry<Effect>,
     /// Branches and wood pieces a whirlwind carries or has thrown (`whirlwind::Debris`).
@@ -188,7 +190,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, fog: None, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -229,6 +231,7 @@ impl GameMap {
             markers: None,
             object_bank: 0,
             shaman_omni: false,
+            fog: None,
             effects: Registry::default(),
             debris: Registry::default(),
             coordinators: Coordinators::default(),
@@ -386,6 +389,10 @@ impl GameMap {
         let tribe_scripts = header.as_ref().map_or(Vec::new(), |h| crate::ai_script::load_tribe_scripts(dat, h.ai_scripts));
         let ai = tribe_scripts.iter().map(|ts| crate::ai::NativeAi::new(ts.owner)).collect();
         let mut map = GameMap { spell_books, build_books, start_camera, markers, object_bank, shaman_omni, tribes, tribe_scripts, ai, ..map };
+        if header.as_ref().is_some_and(|h| h.flags.has(pop3_format::header::LevelFlags::FOG_OF_WAR)) {
+            map.enable_fog();
+            map.reveal_fog_areas(&level);
+        }
         // "Turn 0" (ai-scripts.md "How a script runs"): a real script's setup block, run once here
         // while `now` is still `Tick::ZERO`, before the game truly starts. `tick()`'s own later calls
         // to `tend_ai_scripts` (turns 1, 2, 3, ...) run the `ELSE { EVERY ... }` branch from then on.
@@ -1721,6 +1728,7 @@ impl GameMap {
                 pool.tick(now, update_every, income, book, &mut stores);
             }
         }
+        self.tend_fog();
         self.units.retain(|u| !gone.contains(&u.id));
         self.check_elimination();
         self.shield_everyone_once_ended();

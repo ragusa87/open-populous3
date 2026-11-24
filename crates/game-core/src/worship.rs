@@ -212,6 +212,11 @@ impl GameMap {
                     pool.add(Mana(n));
                 }
             }
+            Reward::RevealFog { cell } => {
+                if let Some(fog) = self.fog.as_mut() {
+                    fog.reveal_area(owner, cell);
+                }
+            }
             Reward::Unhandled { .. } => {}
         }
     }
