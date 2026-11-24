@@ -27,8 +27,8 @@ pub const DRAG_PX: f32 = 6.0;
 /// A click hits a unit within this many pixels of its feet-to-head line.
 pub const HIT_PX: f32 = 10.0;
 /// Below this diagonal (pixels) a box that catches nobody was a click that wobbled (the cursor follows raw mouse
-/// motion, sped up): ours.
-pub const CLICK_SLOP_PX: f32 = 24.0;
+/// motion, sped up; quick clicks were seen drifting up to 44 px): ours.
+pub const CLICK_SLOP_PX: f32 = 64.0;
 /// Height of a unit's hit line, in cells (the shaman sprite is ~0.39 cell tall).
 pub const UNIT_HEIGHT: f32 = 0.4;
 const BOX_BORDER: Color = Color::srgba(1.0, 1.0, 0.95, 0.85);
@@ -99,8 +99,12 @@ impl Selection {
         }
     }
 
-    /// Box over `hits`; `add` (Ctrl) keeps the current selection. An empty box clears it unless adding.
+    /// Box over `hits`; `add` (Ctrl) keeps the current selection. An empty box changes nothing (right click
+    /// deselects).
     pub fn select_box(&mut self, hits: &[OnScreen], add: bool) {
+        if hits.is_empty() {
+            return;
+        }
         if !add {
             self.clear();
         }
@@ -819,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn box_replaces_or_adds_and_empty_clears() {
+    fn box_replaces_or_adds_and_empty_keeps() {
         let mut s = sel(&[Id::from_raw(1)]);
         s.select_box(&[at(2, 0.0), at(3, 0.0)], false);
         assert_eq!(s.units, [2, 3].map(Id::from_raw));
@@ -828,7 +832,7 @@ mod tests {
         s.select_box(&[], true);
         assert_eq!(s.units, [2, 3, 4].map(Id::from_raw));
         s.select_box(&[], false);
-        assert!(s.units.is_empty());
+        assert_eq!(s.units, [2, 3, 4].map(Id::from_raw), "a box catching nobody keeps the selection");
         s.select_box(&[at(2, 0.0)], false);
         s.select_only(Id::from_raw(9));
         assert_eq!(s.units, [9].map(Id::from_raw), "the panel preview selects the shaman alone");
@@ -836,7 +840,7 @@ mod tests {
 
     #[test]
     fn a_small_empty_box_is_the_click_it_wobbled_from() {
-        let (a, near, far) = (Vec2::new(100.0, 100.0), Vec2::new(110.0, 104.0), Vec2::new(200.0, 160.0));
+        let (a, near, far) = (Vec2::new(100.0, 100.0), Vec2::new(142.0, 114.0), Vec2::new(200.0, 160.0));
         assert_eq!(settle_gesture(Gesture::Box(a, near), |_, _| true), Gesture::Click(a));
         assert_eq!(settle_gesture(Gesture::Box(a, near), |_, _| false), Gesture::Box(a, near), "it caught someone");
         assert_eq!(settle_gesture(Gesture::Box(a, far), |_, _| true), Gesture::Box(a, far), "a deliberate empty box");
