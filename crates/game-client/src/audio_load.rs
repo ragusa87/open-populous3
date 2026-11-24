@@ -31,6 +31,7 @@ pub const CUES: &[SoundCue] = &[
     SoundCue::PreacherOk,
     SoundCue::ShamanYes,
     SoundCue::StoneRise,
+    SoundCue::StoneHeadNod,
 ];
 
 /// The `Soundd2` name family a cue plays. A guess (ours) from the entry names: the original picks entries through
@@ -54,6 +55,7 @@ pub fn family_name(cue: SoundCue) -> &'static str {
         SoundCue::PreacherOk => "v_pre_ok",
         SoundCue::ShamanYes => "Sv_yes",
         SoundCue::StoneRise => "rokrise",
+        SoundCue::StoneHeadNod => "Stonehead",
     }
 }
 

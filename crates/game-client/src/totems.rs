@@ -42,7 +42,7 @@ const TURNING: f32 = 0.05;
 /// nodding about a horizontal axis there by `NOD_DEG` each way, one nod every `NOD_SECS`.
 const NECK: i16 = 324;
 const NOD_DEG: f32 = 6.0;
-const NOD_SECS: f32 = 1.6;
+pub const NOD_SECS: f32 = 1.6;
 /// Five nods: the nod's loop in whole ticks (`SimNow::secs_in`).
 const NODS_LOOP: game_core::time::Ticks = game_core::time::Ticks::secs(8);
 

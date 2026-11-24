@@ -1,5 +1,6 @@
 //! Game moments turned into sounds (sound.md "Voices"): the selected people bowing, the ordered ones answering, a
-//! flyby starting or cancelled, a reincarnation site's stones rising. Pure choices, thin systems.
+//! flyby starting or cancelled, a reincarnation site's stones rising, the stone heads nodding. Pure choices, thin
+//! systems.
 
 use crate::audio::{PlaySound, SoundCue};
 use crate::units::selection::Selection;
@@ -143,6 +144,21 @@ fn stone_sounds(map: Res<CurrentMap>, mut watch: Local<StoneWatch>, mut sounds: 
     }
 }
 
+/// Whole nods since the game began (`totems::nod_angle`): every stone head nods in step.
+pub fn nods(secs: f32) -> u32 {
+    (secs / crate::totems::NOD_SECS).floor() as u32
+}
+
+/// Each stone head grinds once per nod, as it tips forward (ours: no stone head sound is traced).
+fn stone_head_sounds(map: Res<CurrentMap>, now: Res<crate::sim_time::SimNow>, mut before: Local<Option<u32>>, mut sounds: MessageWriter<PlaySound>) {
+    let count = nods(now.secs_since(Tick::ZERO));
+    if before.replace(count).is_some_and(|b| b != count) {
+        let heads = map.0.totems.iter().filter(|t| t.kind == game_core::totem::TotemKind::StoneHead);
+        let cell = pop3_format::WORLD_UNITS_PER_CELL as f32;
+        sounds.write_batch(heads.map(|t| PlaySound::at(SoundCue::StoneHeadNod, Vec2::new(t.x as f32, t.z as f32) / cell)));
+    }
+}
+
 fn kinds(map: &CurrentMap, ids: &[UnitId]) -> Vec<UnitKind> {
     ids.iter().filter_map(|&id| map.0.unit(id)).map(|u| u.kind).collect()
 }
@@ -175,7 +191,7 @@ pub struct AudioCuesPlugin;
 
 impl Plugin for AudioCuesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Ordered>().add_systems(Update, (selection_voices, order_voices, flyby_sounds, stone_sounds).in_set(crate::menu::Gameplay));
+        app.add_message::<Ordered>().add_systems(Update, (selection_voices, order_voices, flyby_sounds, stone_sounds, stone_head_sounds).in_set(crate::menu::Gameplay));
     }
 }
 
@@ -231,6 +247,15 @@ mod tests {
         let mut count = 0;
         assert_eq!(sounding(&mut count, 3), vec![true, false, true]);
         assert_eq!(sounding(&mut count, 2), vec![false, true]);
+    }
+
+    #[test]
+    fn a_nod_every_nod_period() {
+        let p = crate::totems::NOD_SECS;
+        assert_eq!(nods(0.0), 0);
+        assert_eq!(nods(p * 0.99), 0);
+        assert_eq!(nods(p), 1);
+        assert_eq!(nods(p * 2.5), 2);
     }
 
     #[test]

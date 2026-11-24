@@ -44,6 +44,8 @@ pub enum SoundCue {
     ShamanYes,
     /// A reincarnation site's stone rising out of the ground (the original's sound 0x9F).
     StoneRise,
+    /// A stone head's nod.
+    StoneHeadNod,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
