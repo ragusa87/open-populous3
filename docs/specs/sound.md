@@ -1,6 +1,6 @@
 # Original sound banks ("SDT")
 
-Not implemented yet. Read-only, never shipped. Derived from PopSoundEditor (Toksisitee, GPLv3, Qt) and
+Read-only, never shipped. Derived from PopSoundEditor (Toksisitee, GPLv3, Qt) and
 cross-checked with a scan of every `.SDT` in `Sound/` of a retail install. Where the editor and the files
 disagree, the files win (see "PopSoundEditor discrepancies").
 
@@ -142,8 +142,11 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
   starts a random drum bank is drawn and its loops chained by the fight intensity (`SetIntensity`, rules in
   "Music and drums"; which melee loop counts as every 4th is our reading). A new drum loop starts the frame
   after one ends: a small gap, not sample-exact.
-- Not done yet: loading clips (`Soundd2` PCM as WAV, CC0 sounds for `--no-original`, MP2 music, the fight bank's
-  alternative ranges), the clips' own loop points (`fire`, `warloop`...), work sounds waiting for an animation
+- Loaded from the install at startup (`audio_load.rs`, nothing with `--no-original`): `PopDrones22` entry 0 as
+  the Menu track and entries 1-4 as the Game variants, their raw Layer II streams decoded by symphonia; the ten
+  drum banks, each entry as a WAV (entry 0 included, played as stored).
+- Not done yet: the SFX (`Soundd2` PCM as WAV through the sound id table, the fight bank's alternative ranges, CC0
+  sounds for `--no-original`), the clips' own loop points (`fire`, `warloop`...), work sounds waiting for an animation
   frame, ambience layers, reverb, game events turned into cues (the fight flag for the intensity).
 
 ## PopSoundEditor discrepancies

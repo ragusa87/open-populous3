@@ -2065,9 +2065,12 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   fight intensity, fade-outs, the pause/menu rules, the original's listener, 48-cell cut-off, `1 - d²/D²`
   falloff and equal-power balance, 10 effects at most, 250 ms between repeats, `--mute`, `--debug-audio`. The
   library is empty: nothing plays yet. The low-quality bank is left out on purpose.
-- [ ] Fill the `SoundLibrary`: `Soundd2` entries as in-memory WAV (bevy `wav` feature) through the sound id ->
-  entry-range table (volume, priority, while-paused flag), the `POPfightnew.SDT` alternative ranges, the drum
-  banks, CC0 sounds for `--no-original`, `PopDrones22` music (MP2 decoder).
+- [ ] Fill the `SoundLibrary`: music (`PopDrones22`, Layer II through symphonia) and the drum banks are loaded
+  (`audio_load.rs`). Left: `Soundd2` entries (`Entry::wav`) through the sound id -> entry-range table (volume,
+  priority, while-paused flag), the `POPfightnew.SDT` alternative ranges, CC0 sounds for `--no-original`.
+  **Question for a spec session**: the per-id record table itself (sound.md "Sound ids") is not in docs/ - its
+  229 rows (first entry, variant count, fight-bank range, priority, volume, while-paused) are needed before any
+  SFX can be wired.
 - [ ] Play SFX from game events: spells, chopping, building, follower voices, ambience layers, the battle crowd;
   the fight flag into `SetIntensity`. Work sounds on their animation frame, the clips' own loop points, reverb,
   drum loops chained without a frame's gap.
