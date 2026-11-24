@@ -2349,6 +2349,12 @@ impl GameMap {
         self.units[i].disguise_as(tribe, delay);
     }
 
+    /// Wood at world point `at` that `owner`'s braves have not discovered: on land it has not explored (pop3-rev-analysis.md
+    /// "Fog of war": a human tribe's wood searches skip it).
+    fn undiscovered(&self, owner: Owner, at: (u16, u16)) -> bool {
+        owner.tribe().is_some_and(|t| self.fogged(t, ((at.0 as u32 / WORLD_UNITS_PER_CELL) as i32, (at.1 as u32 / WORLD_UNITS_PER_CELL) as i32)))
+    }
+
     /// Braves that may take wood: living, not carrying any yet.
     fn can_take_wood(u: &Unit) -> bool {
         u.kind == UnitKind::Brave && u.is_alive() && u.carrying == 0
@@ -2361,11 +2367,11 @@ impl GameMap {
         if !Self::can_take_wood(u) {
             return;
         }
-        let id = u.id;
+        let (id, owner) = (u.id, u.owner);
         let spare = |t: &Tree| t.wood() as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z));
         let chosen = match self.trees.iter().find(|t| (t.x, t.z) == tree).filter(|t| spare(t)) {
             Some(t) => t,
-            None => match self.trees.iter().filter(|t| spare(t) && torus_cells(tree, (t.x, t.z)) <= REFIND_CELLS).min_by_key(|t| torus_dist2(tree, (t.x, t.z))) {
+            None => match self.trees.iter().filter(|t| spare(t) && !self.undiscovered(owner, (t.x, t.z)) && torus_cells(tree, (t.x, t.z)) <= REFIND_CELLS).min_by_key(|t| torus_dist2(tree, (t.x, t.z))) {
                 Some(t) => t,
                 None => return,
             },
@@ -2444,17 +2450,17 @@ impl GameMap {
         if !Self::can_take_wood(u) {
             return;
         }
-        let (me, id) = ((u.x, u.z), u.id);
+        let (me, id, owner) = ((u.x, u.z), u.id, u.owner);
         let piece = self
             .wood
             .iter()
             .map(|w| (w.x, w.z))
-            .filter(|&p| !self.behind_walls(p) && self.units.iter().all(|o| o.id == id || o.fetching() != Some(p)))
+            .filter(|&p| !self.behind_walls(p) && !self.undiscovered(owner, p) && self.units.iter().all(|o| o.id == id || o.fetching() != Some(p)))
             .min_by_key(|&p| torus_dist2(me, p));
         let tree = self
             .trees
             .iter()
-            .filter(|t| t.wood() as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z)))
+            .filter(|t| t.wood() as usize > self.tree_claims((t.x, t.z), id) && !self.behind_walls((t.x, t.z)) && !self.undiscovered(owner, (t.x, t.z)))
             .map(|t| (t.x, t.z))
             .min_by_key(|&p| torus_dist2(me, p));
         match (piece, tree) {
@@ -4314,6 +4320,21 @@ mod tests {
         let c = MAP_SIZE as i32 / 2;
         let t = m.trees.iter().find(|t| t.cell() == (c + x, c + z)).unwrap();
         (t.x, t.z)
+    }
+
+    #[test]
+    fn a_human_tribes_braves_fetch_no_wood_they_have_not_discovered() {
+        let (mut m, ids) = woodland(&[((20, 0), 4)], &[(0, 0)]);
+        m.enable_fog();
+        let start = (unit(&m, ids[0]).x, unit(&m, ids[0]).z);
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::FetchWood });
+        (0..30).for_each(|_| _ = m.tick());
+        assert_eq!((unit(&m, ids[0]).x, unit(&m, ids[0]).z), start, "the only tree stands in the dark");
+        let c = MAP_SIZE as i32 / 2;
+        m.fog.as_mut().unwrap().reveal(TribeId::Blue, (c + 20, c), crate::fog::SIGHT);
+        m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::FetchWood });
+        (0..30).for_each(|_| _ = m.tick());
+        assert!(unit(&m, ids[0]).x > start.0, "off to it once discovered");
     }
 
     #[test]

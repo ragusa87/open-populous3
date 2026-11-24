@@ -7,7 +7,8 @@
 //! own door already walled by one: a worker caught inside once the walls go up can only ever leave by the door
 //! (buildings.md "Walking around buildings"), so a sealed one traps whoever is in there for good. Nor with
 //! a walled cell sharing a side with another building's: a free cell always runs between two buildings, a
-//! path between them (`walls_touch`).
+//! path between them (`walls_touch`). Nor, for a human tribe on a level with fog of war, over land it has not
+//! explored yet (`fogged`).
 //! Integers only.
 
 use crate::building::{Building, BuildingId, BuildingKind, Stage};
@@ -143,6 +144,12 @@ pub fn walls_touch(map: &GameMap, b: &Building, except: Option<BuildingId>) -> b
     map.buildings.iter().filter(|o| Some(o.id) != except).any(|o| o.walled_cells(size).iter().any(|&c| walled.iter().any(|&w| near(w, c))))
 }
 
+/// Whether the world point `p` is unexplored land to `b`'s owner (pop3-rev-analysis.md "Fog of war": a human tribe
+/// cannot build over the fog).
+pub fn fogged(map: &GameMap, b: &Building, p: (u16, u16)) -> bool {
+    b.owner.tribe().is_some_and(|t| map.fogged(t, (cell_of(p.0), cell_of(p.1))))
+}
+
 /// Whether `b` could be placed: steady ground and every point of its footprint free (sampled every
 /// quarter cell). `except`: see `blocked_at`.
 pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> bool {
@@ -151,7 +158,7 @@ pub fn can_place(map: &GameMap, b: &Building, except: Option<BuildingId>) -> boo
     let (cx, cz) = b.centre();
     let span = (f.half.0.abs() + f.offset.0.abs()).max(f.half.1.abs() + f.offset.1.abs());
     let points = (-span..=span).step_by(step as usize).flat_map(|dz| (-span..=span).step_by(step as usize).map(move |dx| (dx, dz)));
-    let mut free = points.map(|(dx, dz)| (cx.wrapping_add(dx as u16), cz.wrapping_add(dz as u16))).filter(|&p| b.covers(p, 0)).all(|p| blocked_at(map, p, except).is_none());
+    let mut free = points.map(|(dx, dz)| (cx.wrapping_add(dx as u16), cz.wrapping_add(dz as u16))).filter(|&p| b.covers(p, 0)).all(|p| blocked_at(map, p, except).is_none() && !fogged(map, b, p));
     free &= !too_steep(map, b) && shore_ok(map, b) && !door_blocked(map, b, except) && !walls_touch(map, b, except);
     free
 }
@@ -185,6 +192,16 @@ mod tests {
         let m = map();
         assert!(can_place(&m, &hut((30, 30)), None));
         assert_eq!(blocked_at(&m, (30 * 512, 30 * 512), None), None);
+    }
+
+    #[test]
+    fn a_human_tribe_cannot_build_over_land_it_has_not_explored() {
+        let mut m = map();
+        assert!(can_place(&m, &hut((30, 30)), None));
+        m.enable_fog();
+        assert!(!can_place(&m, &hut((30, 30)), None), "far from the site: unexplored");
+        m.fog.as_mut().unwrap().reveal(TribeId::Blue, (30, 30), crate::fog::SIGHT);
+        assert!(can_place(&m, &hut((30, 30)), None));
     }
 
     #[test]
