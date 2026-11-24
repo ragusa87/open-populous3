@@ -1788,7 +1788,20 @@ Level/world correctness that is mostly stable already (terrain especially: exten
 
 ### Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
 - [x] Start camera from the header's start position (cell) and angle (2048ths): `camera::start_view`.
-- [ ] Level flags: fog of war (0x01, levels 9 and 18), shaman omni (0x02, level 25; `GameMap::shaman_omni`: spells start from the view and have no range, the rest of god mode to find), no guest spells (0x10), no reincarnation time (0x20).
+- [ ] Fog of war (level flag 0x01, levels 9 and 18), from pop3-rev-analysis.md "Fog of war": a permanent
+  per-cell "explored" bit for the local player only, all clear at level start, never cleared again (a shroud,
+  not line of sight). Reveal a disc of radius 5 (the cells closer than 6 cells: 109 cells, 11 across) around a
+  player person, boat, balloon or angel each time it enters a new cell and its own cell or one of the 4 cells
+  straight ahead is unexplored (also at once for a person converted or hypnotised to the player); at start a
+  disc 14 then 7 around the player's reincarnation site; effect 81 "reveal fog area" (placed in the level, at
+  load when no trigger points at it, else when its trigger fires, e.g. praying at a stone head) and the portal
+  scenery reveal a disc 5 around each cell of their 3x3 block, the effect then deletes itself; Armageddon reveals
+  its 11-cell arena. Same sight for every unit type. Draw unexplored terrain black with a one-cell soft edge, do
+  not draw anything standing or flying over unexplored cells (whoever owns it), no minimap dots there, tooltip
+  "Fog of War: Unexplored land hidden by fog."; dim the sky colours by min(1, explored cells on screen / 50) in
+  sixteenths; fog stays off on the special "level 99"; refuse building footprints over unexplored cells ("Can't Build,
+  Fog of War"); the player's braves ignore trees on unexplored cells. Spotting, targeting and combat ignore fog.
+- [ ] Level flags: shaman omni (0x02, level 25; `GameMap::shaman_omni`: spells start from the view and have no range, the rest of god mode to find), no guest spells (0x10), no reincarnation time (0x20).
 - [x] Default allies per tribe (`.hdr` 92) read into `game_core::tribes::Tribes` and used for: elimination/win-lose
   grouping by side, and the two places that gate whether an attack may start (`attack::attack_goal`,
   `spotting::first_seen`) — allies no longer spot or attack each other. Still open: the rest of the alliance-aware

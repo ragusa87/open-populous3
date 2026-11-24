@@ -162,6 +162,11 @@ so a live measurement may run on it with the addresses translated.
 - **The low-quality sound bank is EA MicroTalk** [exe, measured]: `soundd2low.SDT`'s compressed entries are
   standard MicroTalk frames (the public utkencode decoder applies unchanged) in a raw stream with one leading
   mono/stereo bit and a per-frame left/right alternation for stereo. See "Low-quality sound bank codec".
+- **Fog of war is a permanent "explored" shroud, not line of sight** [exe]: one bit per map cell, set for good
+  when one of the player's units comes within about 5 cells, never cleared during play. Unexplored cells draw
+  black and hide every object on them (an enemy firewarrior there is invisible, its fireball shows once over
+  explored land); explored cells show everything live. Gameplay is unchanged except: no building on unexplored
+  cells, and the player's tribe ignores unexplored trees. See "Fog of war".
 
 ## Turns and timing [exe]
 ```text
@@ -5944,6 +5949,98 @@ equivalent: they call into task 24's own handler, a parallel mechanism, not `0x4
 itself. See `ai-scripts.md`'s "Markers, guards and the base" for the PopScript-level command reference this
 confirms.
 
+## Fog of war [exe]
+Level flag 0x01 (levels 9 and 18 in the campaign; also the cheat menu's "Fog of war" item). It is a shroud of
+*explored* land, not a line-of-sight fog: nothing is hidden again once seen, and nothing about what units can
+see, target or attack depends on it.
+
+**State.** One bit per map cell (map-cell flags `+0x0` bit `0x8`, "explored"), global, written only on behalf of
+the local player (`0x89C6F0`): the AI tribes have none and need none. `load_level` zeroes the whole cell table, so
+a fog level starts fully unexplored. The level's flag sets `level_flags` (0x895DA8) bit `0x2`; its apply callback
+0x443910 then sets bit `0x4`, the "fog active" bit every reader below tests (also `0x96EAD2` bit 0x1). Bit `0x4`
+stays clear when `0x89C665` bit `0x200` is set: the level loaders (`load_level2` 0x484A37, `next_level`
+0x48597E, `savegame` 0x426F0B) set it while the level being played is one special level (number held at
+`0x89A315`, played under the internal number 99, the one with its own `cpscr099.dat`/`cpatr099.dat`; plausibly
+the tutorial, not confirmed); the same bit also skips the per-turn tribe-loss check (`main_loop_inner` 0x4EC78B).
+
+All readers were enumerated (every test of `level_flags` bit 0x4 and of the cell's bit 0x8): rendering, the
+minimap, tooltips, the reveal callers, building placement and the player's tree scans. None is in spotting,
+targeting, combat, spell casting or the AI.
+
+**Revealing.** `reveal(mode, cell)` (0x450610) marks cells explored; a cell newly marked also registers any tree
+or wood pile on it with the player's tribe (below). Its shapes are rings from `data/MWSEARCH.DAT` (loaded at start,
+0x49A5F0, iterated by 0x49A2F0/0x49A3F0): ring r = every cell offset whose distance from the centre is in
+`[r, r+1)` (ring 0 = 1 cell, 1 = 8, 2 = 16, 3 = 20, 4 = 24, 5 = 40, ...). "Disc r" = rings 0..r, the cells
+closer than r + 1 to the centre. Offsets wrap around the map like everything else.
+```text
+mode 1  explore the whole map  - only on losing in cheat mode (game_flags_1 bit 0x8); mode 0 (un-explore all) unused
+mode 2  disc 5 around a cell: 109 cells, 11 cells across (radius about 5.9 cells)
+mode 5  disc 14: 697 cells, 29 across, without the per-cell texture refresh (the caller redraws)
+mode 3  one cell (mode 4: the same without texture refresh)
+```
+Callers (fog active only):
+```text
+player person, each time it enters a new cell (person physics 0x4E6D00):
+  look at its own cell and the 4 next cells straight ahead along its heading (+0x5D), 1 cell apart;
+  if any of those 5 is unexplored: reveal disc 5 around its own cell
+player boat or balloon: same rule (0x4E7FB0, 0x4E89A0)
+player Angel of Death: every turn its own cell is unexplored, disc 5 (0x4DDB30)
+a person newly converted / hypnotised into the player's tribe: the same look-ahead rule, at once (0x4D7FD0, 0x50EB00)
+level start, the player's reincarnation site: disc 14 (RC intro 0x41C140), and disc 7 when the site's ground is
+  set up with its "reveal" argument (0x44FF80 from the intro, and from 0x41986F)
+Armageddon: every cell within 0x1600 (11 cells) of the arena centre (0x477D50)
+effect 81 "reveal fog area" (class 7 type 0x51, init 0x50A4B1 -> effect state 66, 0x50AE80): disc 5 around each
+  cell of the 3x3 block centred on it (about a 7-cell radius), then deletes itself the same turn; with fog off it
+  only deletes itself
+scenery 14 (portal), when created: the same 3x3 block of discs (0x4A67D0, scenery-type flag +0x16 bit 0x2)
+```
+Every unit has the same sight: no per-type radius (a watchtower's `DT_RADIUS` is the sentry alarm's, "Watchtower
+sentry scan and alarm", unrelated to fog). Standing still or sitting in a building reveals nothing more. Since the
+trigger only looks under the unit and straight ahead, a unit walking parallel to the edge of explored land
+(unexplored cells only to its side) reveals nothing until its path points into them.
+
+**Totems and other level hooks.** No building or scenery type reveals by itself except the portal. The hooks are
+level data, effect-81 things. Those no trigger points at are created at level load, so their areas start
+explored (level 9 has 20, level 18 has 16). Those a trigger points at are created when it fires, so praying at a
+stone head (scenery 9, the totem) can uncover distant areas [files]: level 9 trigger 216, on the head at cell
+(60, 68), followers praying 180 turns, reveals 4 areas; level 9 trigger 224, walk-in by 6 people at (123, 75),
+reveals one; level 18 trigger 490 (type 2) reveals one. Other levels hold effect-81 things too, inert there.
+
+**Drawing** (the viewer's screen only; the simulation is identical):
+```text
+terrain: each cell corner gets brightness factor 32 if its cell is explored, 0 if not, interpolated across the
+  cell (landscape_texture_32/16 0x4BF860/0x4C0380) -> unexplored land is black, with a one-cell soft edge
+objects: draw_units' per-cell object walk (0x46D0F0) skips unexplored cells: people, buildings, trees, effects
+  and shots standing or flying over them are not drawn, whoever owns them
+minimap / globe: unexplored cells in a flat dark colour, no unit dots on them (0x4207B2, 0x41D8BA, 0x4203D3)
+animated sea polygons are not drawn while fog is active (draw_polygons 0x467899)
+sky dims with the dark: each frame draw_units counts the explored cells it walks (0x87CA50, reset 0x46E12E);
+  0x4A2EE5 then sets k = 16 if that count is over 50, else count * 16 / 50 (integer), and when k changes
+  rescales the 16 sky colours (palette 112-127, saved at level start by 0x4A2920) to colour * k / 16 ->
+  looking at mostly unexplored land darkens the sky, down to black with no explored cell in view
+mouse-over an unexplored cell: lang00 0x349 "Fog of War: Unexplored land hidden by fog." (0x4F1160)
+an enemy unit's icon/health bar: hidden on unexplored cells (can_show_unit_icon 0x4F1280)
+```
+So an enemy firewarrior in the dark shooting at the player's people in the light is not drawn, and its fireball
+appears as soon as it flies over an explored cell: the shroud hides objects by the cell under them, not by
+owner. Nothing in spotting, targeting or combat reads the fog bit (no reader in the combat code): both sides
+spot, auto-attack and shoot across it as without fog (not checked live for the player's own units attacking into
+the dark).
+
+**Gameplay effects** (the only ones found):
+```text
+building placement: an unexplored footprint cell is invalid for a human tribe (tribe +0xC1F != 1): reason bit
+  0x40000000 in tribe +0x93D -> lang00 0x24E "Can't Build, Fog of War: You cannot build over the fog because it
+  hasn't been explored yet." (0x44EE50, message lookup 0x49A070)
+trees: wood is found through "wood-search zones" (up to 120 records of 24 bytes at 0x93A7A0, created by
+  0x4935C0 around a building or worker that needs wood - hut growth 0x4050C0, the fetch-wood work 0x496750 -
+  each holding a linked list of the trees within its radius). For a zone of the player's tribe, the scans that
+  fill it (0x493F10, 0x493FA0, 0x494360, 0x494490, 0x494D10, 0x495390) skip unexplored cells, and a tree or wood
+  pile (scenery 1-6 and 11, scenery-type flag +0x14 bit 0x4) is added to those zones when its cell becomes
+  explored (0x494F50): the player's braves do not go for wood they have not discovered; the AI's do
+```
+Cheat mode (game_flags_1 bit 0x8) bypasses the tree filter.
+
 ## Low-quality sound bank codec [exe, measured]
 `soundd2low.SDT` (loaded instead of `Soundd2.sdt` when the "high quality sound" option, `0x895DA8` bit
 `0x4000000`, is off) stores most entries with SDT flag `0x10`. That is EA MicroTalk; the format and its
@@ -6262,8 +6359,19 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   between them) if it recurs, though the trace doesn't show it changing the broad shape (channels one cell wide,
   not a flood fill, either way). `Lava::effect()` (Earthquake's static fissure) matches "lava square" structurally
   but has the same instant-kill issue and no decay-then-self-destruct-then-ash behaviour.
+- level-format.md / `pop3_format::header::LevelFlags::FOG_OF_WAR`: the flag is parsed but nothing uses it, and
+  effect 81 "reveal fog area" does nothing. The original ("Fog of war"): one permanent explored bit per cell for
+  the local player, cleared at level load; reveal disc 5 (cells closer than 6) around a player unit (person,
+  boat, balloon, angel) whenever it enters a cell with an unexplored cell among its own and the 4 ahead; disc 14
+  then 7 at the player's reincarnation site at start; effect 81 and the portal reveal a 3x3 block of disc-5s;
+  Armageddon its 11-cell arena. Rendering: unexplored terrain black (soft one-cell edge), objects on unexplored
+  cells not drawn, minimap dark, tooltip 0x349, sky dimmed when under 50 explored cells are on screen. Gameplay: no building on unexplored cells (message 0x24E), the
+  player's tribe ignores undiscovered trees; no effect on spotting, targeting or combat.
 
 ## Open questions
+- Fog of war ("Fog of war"): which level is the fog-exempt "level 99" (`0x89A315`); whether the player's own
+  people auto-attack enemies standing in unexplored cells (no fog check exists in the code, not tried live);
+  whether hidden units can be clicked/selected; whether the D3D sky draws from the dimmed palette entries.
 - Bored poses ("Bored poses"): what the warrior/firewarrior gate `+0x82 & 0xF0 <= 0x10` means, and where the spy's
   juggling (anim 92, object 0xA4) is triggered.
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
@@ -6675,6 +6783,13 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x512240 | `effect_aod` (per turn, class-7 type 0x13, effect state 20): spawns the falling meteor, then `create_aod` once it's gone - "Angel of Death mechanics" |
 | 0x50A3E2, 0x514F60 | the meteor (type 0x48, effect state 59), init/per turn: invisible, trails 36 "orbiter" spark sprites, spawns the ground shockwave on impact - "Angel of Death mechanics" |
 | 0x514970, 0x5149F0 | "ground shockwave" (type 0x45, effect state 56), init/per turn: a real expanding-then-subsiding terrain-height ring, no sprite - "Angel of Death mechanics" |
+| 0x450610 | "reveal(mode, cell)": marks map cells explored (flag 0x8): whole map, disc 5, disc 14 or one cell - "Fog of war" |
+| 0x443910 | fog-of-war apply: `level_flags` bit 0x2 (requested) -> bit 0x4 (active) - "Fog of war" |
+| 0x4E69C0 | "unexplored ahead": own cell or one of the 4 cells ahead along the heading is unexplored - "Fog of war" |
+| 0x50A4B1, 0x50AE80 | effect 81 "reveal fog area" (type 0x51, effect state 66): init, reveal a 3x3 block of disc-5s and delete - "Fog of war" |
+| 0x49A2F0, 0x49A3F0, 0x49A5D0 | ring iterator over `MWSEARCH.DAT` (start, next cell, end): rings of cells by distance - "Fog of war" |
+| 0x44EE50 | building-placement check of one footprint cell (unexplored -> "Can't Build, Fog of War") - "Fog of war" |
+| 0x494F50 | registers a newly explored tree/wood pile with the tribes' wood-search records - "Fog of war" |
 | 0x4DD700 | `create_aod`: spawns the type-8 angel, runs its hunting AI (person state 28) once synchronously - "Angel of Death mechanics" |
 | 0x4DB980 | person state 28, the angel's entire hunting/combat/grab AI (huge, outer `+0x2D` dispatch mostly unopened) - "Angel of Death mechanics" |
 | 0x4DB5E0 | `aod_area_panic`: the angel's own nearby-bystander panic (8-cell radius, person state 26), independent of its locked target |

@@ -221,7 +221,7 @@ there, it is not a separate thing in the file).
 
   | Bit | Meaning | Seen in |
   |---|---|---|
-  | 0x01 | fog of war | levels 9 and 18 |
+  | 0x01 | fog of war (rules: pop3-rev-analysis.md "Fog of war"; effect 81 things pre-reveal or reveal areas) | levels 9 and 18 |
   | 0x02 | "shaman omni", shown as "God mode" in the editor | level 25 |
   | 0x04, 0x08 | force 640x480, level edit [editor] | |
   | 0x10 | no guest spells | 2111, 2120, 2128, 2133 |
