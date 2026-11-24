@@ -554,34 +554,36 @@ pub fn waits(moment: Moment, positional: bool, info: &CueInfo) -> bool {
     }
 }
 
-/// How much a playing (or new) effect is worth keeping: its priority first, then fewer copies of the same
-/// sound, then closeness (sound.md "Mixing": the quietest-ranked is cut; the order of these is our reading).
+/// How much a playing (or new) effect is worth keeping (sound.md "Sound id table", voice stealing).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rank {
     pub priority: u8,
+    /// Copies of the same sound playing, itself included.
     pub copies: usize,
+    /// 0..1 (`audio_space::falloff`), 1 for a flat sound.
     pub closeness: f32,
+    /// A loop: each other copy halves it twice.
+    pub looped: bool,
 }
 
 impl Rank {
-    fn key(&self) -> (u8, std::cmp::Reverse<usize>, f32) {
-        (self.priority, std::cmp::Reverse(self.copies), self.closeness)
-    }
-
-    fn below(&self, other: &Rank) -> bool {
-        self.key().partial_cmp(&other.key()) == Some(std::cmp::Ordering::Less)
+    /// The original's score: priority x 256, halved once per 16 steps of remoteness (127 - closeness on 0..127),
+    /// x 1024, halved once per other copy of the same sound (twice for a loop).
+    pub fn score(&self) -> u64 {
+        let remote = 127 - (self.closeness.clamp(0.0, 1.0) * 127.0) as u32;
+        let copies = (self.copies.saturating_sub(1) * if self.looped { 2 } else { 1 }) as u32;
+        ((self.priority as u64 * 256) >> (remote / 16)) * 1024 >> copies.min(63)
     }
 }
 
-/// Room for a new effect among `playing`: Ok(None) free, Ok(Some(i)) by cutting `playing[i]`, Err if all
-/// outrank it.
+/// Room for a new effect among `playing`: Ok(None) free, Ok(Some(i)) by cutting the lowest-scored `playing[i]` if
+/// the new one scores at least as much, Err if not.
 pub fn make_room(playing: &[Rank], new: Rank) -> Result<Option<usize>, Skip> {
     if playing.len() < MAX_FX {
         return Ok(None);
     }
-    let lowest = (0..playing.len()).min_by(|&a, &b| playing[a].key().partial_cmp(&playing[b].key()).unwrap_or(std::cmp::Ordering::Equal));
-    match lowest {
-        Some(i) if playing[i].below(&new) => Ok(Some(i)),
+    match (0..playing.len()).min_by_key(|&i| playing[i].score()) {
+        Some(i) if playing[i].score() <= new.score() => Ok(Some(i)),
         _ => Err(Skip::Busy),
     }
 }
@@ -839,19 +841,19 @@ fn ranks(voices: &Playing, listener: &Listener) -> Vec<(Entity, Rank)> {
         .map(|(e, v)| {
             let copies = fx.iter().filter(|(_, o)| o.cue == v.cue).count();
             let closeness = v.at.map_or(1.0, |at| place(listener, at).map_or(0.0, |p| p.gain));
-            (*e, Rank { priority: v.info.priority, copies, closeness })
+            (*e, Rank { priority: v.info.priority, copies, closeness, looped: v.loop_key.is_some() })
         })
         .collect()
 }
 
 /// Makes room for a new effect: fades out the lowest-ranked one if the new one outranks it and `may_cut`.
-fn admit(played: &Played, cue: SoundCue, may_cut: bool, voices: &Playing, listener: &Listener, commands: &mut Commands) -> Result<(), Skip> {
+fn admit(played: &Played, cue: SoundCue, looped: bool, may_cut: bool, voices: &Playing, listener: &Listener, commands: &mut Commands) -> Result<(), Skip> {
     let ranked = ranks(voices, listener);
     if !may_cut && ranked.len() >= MAX_FX {
         return Err(Skip::Busy);
     }
     let copies = voices.iter().filter(|(_, v)| v.cue == Some(cue)).count() + 1;
-    let new = Rank { priority: played.info.priority, copies, closeness: played.placement.map_or(1.0, |p| p.gain) };
+    let new = Rank { priority: played.info.priority, copies, closeness: played.placement.map_or(1.0, |p| p.gain), looped };
     let list: Vec<Rank> = ranked.iter().map(|r| r.1).collect();
     if let Some(i) = make_room(&list, new)? {
         fade_out(commands, ranked[i].0, FX_FADE);
@@ -884,7 +886,7 @@ fn play_sounds(
                 result = Err(Skip::OwnerBusy);
             } else if too_soon(last.0.get(&repeat_key(cue, request.at)).copied(), now) {
                 result = Err(Skip::TooSoon);
-            } else if let Err(skip) = admit(played, cue, true, &voices, &listener.0, &mut out.commands) {
+            } else if let Err(skip) = admit(played, cue, false, true, &voices, &listener.0, &mut out.commands) {
                 result = Err(skip);
             }
         }
@@ -961,7 +963,7 @@ fn run_loops(
         if let Ok(played) = &result {
             if waits(moment, state.at.is_some(), &played.info) {
                 result = Err(Skip::Held);
-            } else if let Err(skip) = admit(played, state.sound.cue, !state.started, &voices.p0(), &listener.0, &mut out.commands) {
+            } else if let Err(skip) = admit(played, state.sound.cue, true, !state.started, &voices.p0(), &listener.0, &mut out.commands) {
                 result = Err(skip);
             }
         }
@@ -1225,16 +1227,21 @@ mod tests {
     }
 
     #[test]
-    fn a_full_mix_cuts_the_lowest_ranked_for_a_better_one() {
-        let r = |priority, copies, closeness| Rank { priority, copies, closeness };
-        let mut playing = vec![r(1, 1, 0.9); MAX_FX - 1];
+    fn a_full_mix_cuts_the_lowest_scored_for_one_scoring_as_much() {
+        let r = |priority, copies, closeness| Rank { priority, copies, closeness, looped: false };
+        assert_eq!(r(0x80, 1, 1.0).score(), 0x80 * 256 * 1024);
+        assert_eq!(r(0x80, 1, 0.0).score(), (0x80 * 256 >> 7) * 1024, "127 steps away: halved 7 times");
+        assert_eq!(r(0x80, 3, 1.0).score(), 0x80 * 256 * 1024 / 4, "two other copies");
+        assert_eq!(Rank { looped: true, ..r(0x80, 2, 1.0) }.score(), 0x80 * 256 * 1024 / 4, "a loop's copy counts twice");
+        let mut playing = vec![r(0x80, 1, 0.9); MAX_FX - 1];
         assert_eq!(make_room(&playing, r(0, 1, 0.1)), Ok(None), "room left");
-        playing.push(r(1, 1, 0.2));
-        assert_eq!(make_room(&playing, r(1, 1, 0.5)), Ok(Some(MAX_FX - 1)), "the farthest of equal priority");
-        assert_eq!(make_room(&playing, r(1, 1, 0.1)), Err(Skip::Busy));
-        assert_eq!(make_room(&playing, r(2, 5, 0.0)), Ok(Some(MAX_FX - 1)), "priority first");
-        playing[3] = r(1, 4, 1.0);
-        assert_eq!(make_room(&playing, r(1, 1, 0.1)), Ok(Some(3)), "many copies of one sound go first");
+        playing.push(r(0x80, 1, 0.2));
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.5)), Ok(Some(MAX_FX - 1)), "the farthest of equal priority");
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.2)), Ok(Some(MAX_FX - 1)), "as much is enough");
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.0)), Err(Skip::Busy));
+        assert_eq!(make_room(&playing, r(0xFF, 1, 0.6)), Ok(Some(MAX_FX - 1)), "priority outweighs a little distance");
+        playing[3] = r(0x80, 8, 1.0);
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.9)), Ok(Some(3)), "many copies of one sound go first");
     }
 
     #[test]

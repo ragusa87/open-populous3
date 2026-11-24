@@ -128,8 +128,8 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
   distances on the wrapped map, a cut-off at 48 cells (not started past it, faded out once out of it), the volume
   times `1 - d²/48²`, an equal-power balance from the bearing folded into -90..90°. Our own stereo source
   (`audio_source.rs`) applies the gains, updated every frame.
-- At most 10 effects at once: a full mix cuts its lowest-ranked one for a new one that outranks it (priority, then
-  fewer copies of the same sound, then closeness: that order is our reading). A loop only cuts on its first
+- At most 10 effects at once: a full mix cuts its lowest-scored one for a new one scoring at least as much, by the
+  original's score ("Sound id table": priority, halved by remoteness and by copies of the same sound). A loop only cuts on its first
   start; coming back (next variant, back in reach, after being cut) it waits for a free slot, else loops would
   keep cutting each other (ours). The same sound never restarts within 250 ms (one-shots) from the same cell; from another cell it does (ours: a
   site's stones land a turn apart, the original keys this by sound id alone).
