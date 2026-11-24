@@ -525,7 +525,7 @@ impl Plugin for SoundPlugin {
             .add_message::<StopLoop>()
             .add_message::<PlayMusic>()
             .add_message::<SetIntensity>()
-            .add_systems(Update, (track_listener, music_for_state, play_sounds, run_loops, play_music, run_drums, apply_voices, reap_sinkless).chain());
+            .add_systems(Update, (track_listener, music_for_state, fight_drums, play_sounds, run_loops, play_music, run_drums, apply_voices, reap_sinkless).chain());
     }
 }
 
@@ -782,7 +782,7 @@ fn run_drums(mut out: Output, mut intensities: MessageReader<SetIntensity>, mut 
     }
     let loops = library.drums.get(bank).map_or(&[][..], |b| b.as_slice());
     let intensity = drums.intensity;
-    let entry = drums.state.next(intensity, loops.len());
+    let Some(entry) = drums.state.next(intensity, loops.len()) else { return };
     let result = resolve_music(loops.get(entry).ok_or(Skip::NoClip), &mixer, out.on());
     let skipped = result.as_ref().err().copied();
     if skipped.is_none() || skipped != drums.skipped {
@@ -791,6 +791,19 @@ fn run_drums(mut out: Output, mut intensities: MessageReader<SetIntensity>, mut 
     drums.skipped = skipped;
     if let Ok(played) = result {
         out.spawn(&played, Voice::new(Role::Drum), PlaybackSettings::DESPAWN);
+    }
+}
+
+/// The drums' intensity from the player's people fighting, sent when it changes.
+fn fight_drums(map: Option<Res<crate::world::CurrentMap>>, state: Option<Res<State<AppState>>>, drums: Res<Drums>, mut out: MessageWriter<SetIntensity>) {
+    let Some(state) = state else { return };
+    let playing = *state.get() == AppState::Playing;
+    let intensity = match map {
+        Some(map) if playing => crate::audio_drums::fight_intensity(&map.0.units, game_core::tribes::Owner::Tribe(crate::units::PLAYER)),
+        _ => Intensity::Calm,
+    };
+    if intensity != drums.intensity {
+        out.write(SetIntensity(intensity));
     }
 }
 
@@ -1187,8 +1200,11 @@ mod tests {
         assert_eq!(roles(&mut app), vec!["Track"], "no drums behind the menus");
         send(&mut app, PlayMusic(Some(MusicTrack::Game)));
         app.update();
-        assert_eq!(roles(&mut app), vec!["Drum", "Track"], "the game track and its drums");
+        assert_eq!(roles(&mut app), vec!["Track"], "no drums while calm");
         assert_eq!(fading(&mut app), 1, "the menu track fades out");
+        send(&mut app, SetIntensity(Intensity::Attacking));
+        app.update();
+        assert_eq!(roles(&mut app), vec!["Drum", "Track"], "a fight starts the drums");
         let drum = voices(&mut app).into_iter().find(|v| v.1.role == Role::Drum).unwrap();
         assert!(matches!(drum.2.mode, PlaybackMode::Despawn), "each drum loop ends, the next is chosen");
         send(&mut app, SetIntensity(Intensity::Melee));
@@ -1196,7 +1212,7 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Drums>().state, {
             let mut s = DrumState::default();
-            s.next(Intensity::Calm, 4);
+            s.next(Intensity::Attacking, 4);
             s.next(Intensity::Melee, 4);
             s
         });

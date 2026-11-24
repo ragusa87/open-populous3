@@ -2072,7 +2072,9 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   229 rows (first entry, variant count, fight-bank range, priority, volume, while-paused) are needed before any
   SFX can be wired.
 - [ ] Play SFX from game events: spells, chopping, building, follower voices, ambience layers, the battle crowd;
-  the fight flag into `SetIntensity`. Work sounds on their animation frame, the clips' own loop points, reverb,
+  the fight flag into `SetIntensity` (done as a guess: scaled by the player's people engaged, calm silent -
+  sound.md "Playback in the client"; replace by the original's flag, or keep the scaling and tune `MELEE_ARMY`,
+  once heard in play). Work sounds on their animation frame, the clips' own loop points, reverb,
   drum loops chained without a frame's gap.
   Triggers are now mapped (sound.md "How the original plays them"): play by sound id through the id -> entry-range
   table, not by bank index; looping sounds need explicit stops; music = drone track + intensity-driven drum loops.

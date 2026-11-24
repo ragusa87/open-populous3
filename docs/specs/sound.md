@@ -142,6 +142,10 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
   Game track starts a random drum bank is drawn (none behind the menus: the Menu track plays alone) and its loops chained by the fight intensity (`SetIntensity`, rules in
   "Music and drums"; which melee loop counts as every 4th is our reading). A new drum loop starts the frame
   after one ends: a small gap, not sample-exact.
+- Drums, ours (guesses, not the original's rules): calm plays no drums at all (the original plays its calm loop,
+  entry 0); the intensity comes from how many of the player's living people attack, challenge or are in a melee
+  (`audio_drums::fight_intensity`): none calm, 1-4 attacking (entry 1), `MELEE_ARMY` (5) or more melee (entries
+  2/3), instead of the original's attacking/in-a-melee flag.
 - Loaded from the install at startup (`audio_load.rs`, nothing with `--no-original`): `PopDrones22` entry 0 as
   the Menu track and entries 1-4 as the Game variants, their raw Layer II streams decoded by symphonia; the ten
   drum banks, each entry as a WAV (entry 0 included, played as stored).
