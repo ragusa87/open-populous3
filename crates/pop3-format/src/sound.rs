@@ -1,5 +1,5 @@
-//! Original sound banks ("SDT"): see docs/specs/sound.md. Parsing only - no playback, no MPEG decoding,
-//! no CC0 replacement sounds (a separate, much larger item: `docs/specs/sound.md`'s own TODO neighbour).
+//! Original sound banks ("SDT"): see docs/specs/sound.md. Parsing, and PCM entries wrapped as WAV; MPEG
+//! decoding is left to the player.
 
 use crate::level::LevelError;
 use std::ops::Range;
@@ -69,6 +69,29 @@ impl Entry {
     /// the interleaved form back anyway.
     pub fn pcm(&self, bank_data: &[u8]) -> Vec<i16> {
         bank_data[self.data.clone()].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect()
+    }
+
+    /// The entry as a WAV file (sound.md "Sample data"): its PCM as is, at its rate and channel count.
+    pub fn wav(&self, bank_data: &[u8]) -> Vec<u8> {
+        let pcm = &bank_data[self.data.start..self.data.start + self.data.len() / 2 * 2];
+        let channels: u16 = if self.is_stereo() { 2 } else { 1 };
+        let rate = self.sample_rate as u32;
+        let align = channels * 2;
+        let mut out = Vec::with_capacity(44 + pcm.len());
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&channels.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * align as u32).to_le_bytes());
+        out.extend_from_slice(&align.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+        out.extend_from_slice(pcm);
+        out
     }
 }
 
@@ -272,6 +295,27 @@ mod tests {
         assert!(!bank.entries[1].is_placeholder());
         assert_eq!(bank.entries[0].data.len(), HEADER_SIZE + real_data.len(), "entry 0's declared data spans entry 1's own header+data");
         assert_eq!(bank.entries[1].pcm(&bank_data).len(), real_data.len() / 2, "entry 1 still parses its own real data correctly");
+    }
+
+    #[test]
+    fn wav_wraps_the_pcm_with_its_rate_and_channels() {
+        let pcm: Vec<u8> = (0..6i16).flat_map(i16::to_le_bytes).collect();
+        let bank_data = container(&[(header(b"amb", 16, pcm.len() as u32, 22050, 16, 0x03, 0, 0), pcm.clone()), (header(b"odd", 16, 3, 44100, 16, 0x02, 0, 0), vec![1, 2, 3])]);
+        let bank = SoundBank::parse(&bank_data).unwrap();
+        let wav = bank.entries[0].wav(&bank_data);
+        let u16_at = |at: usize| u16::from_le_bytes([wav[at], wav[at + 1]]);
+        let u32_at = |at: usize| u32::from_le_bytes(wav[at..at + 4].try_into().unwrap());
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(u32_at(4) as usize, wav.len() - 8);
+        assert_eq!(&wav[8..16], b"WAVEfmt ");
+        assert_eq!((u16_at(20), u16_at(22), u32_at(24), u32_at(28), u16_at(32), u16_at(34)), (1, 2, 22050, 22050 * 4, 4, 16));
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(u32_at(40) as usize, pcm.len());
+        assert_eq!(&wav[44..], pcm.as_slice());
+
+        let odd = bank.entries[1].wav(&bank_data);
+        assert_eq!(odd.len(), 44 + 2, "a trailing half sample is dropped");
+        assert_eq!(u16::from_le_bytes([odd[22], odd[23]]), 1);
     }
 
     #[test]
