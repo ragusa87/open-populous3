@@ -292,6 +292,12 @@ pub const FX_FADE: f32 = 0.1;
 /// Fade-out of stopped music, seconds: longer (sound.md "Mixing"; the length is a guess).
 pub const MUSIC_FADE: f32 = 1.5;
 
+/// What `REPEAT_GAP` holds back: the same sound from the same cell (flat sounds share one). Ours: per cell, so
+/// the same sound from different places (a site's stones landing a turn apart) is not held back.
+pub fn repeat_key(cue: SoundCue, at: Option<Vec2>) -> (SoundCue, Option<(i32, i32)>) {
+    (cue, at.map(|p| (p.x.floor() as i32, p.y.floor() as i32)))
+}
+
 pub fn too_soon(last: Option<Duration>, now: Duration) -> bool {
     last.is_some_and(|t| now.saturating_sub(t) < REPEAT_GAP)
 }
@@ -430,7 +436,7 @@ struct Drums {
 
 /// When each sound last started, real time.
 #[derive(Resource, Debug, Default)]
-struct LastStarts(HashMap<SoundCue, Duration>);
+struct LastStarts(HashMap<(SoundCue, Option<(i32, i32)>), Duration>);
 
 /// Variant draws so far.
 #[derive(Resource, Debug, Default)]
@@ -651,7 +657,7 @@ fn play_sounds(
                 result = Err(Skip::Held);
             } else if request.owner.is_some_and(|o| voices.iter().any(|(_, v)| v.owner == Some(o))) {
                 result = Err(Skip::OwnerBusy);
-            } else if too_soon(last.0.get(&cue).copied(), now) {
+            } else if too_soon(last.0.get(&repeat_key(cue, request.at)).copied(), now) {
                 result = Err(Skip::TooSoon);
             } else if let Err(skip) = admit(played, cue, true, &voices, &listener.0, &mut out.commands) {
                 result = Err(skip);
@@ -659,7 +665,7 @@ fn play_sounds(
         }
         out.log(|| describe_fx("fx", request.sound, request.at, &result));
         let Ok(played) = result else { continue };
-        last.0.insert(cue, now);
+        last.0.insert(repeat_key(cue, request.at), now);
         let voice = Voice { cue: Some(cue), info: played.info, at: request.at, owner: request.owner, ..Voice::new(Role::Effect) };
         out.spawn(&played, voice, PlaybackSettings::DESPAWN);
     }
@@ -987,6 +993,10 @@ mod tests {
         assert!(!too_soon(None, ms(0)));
         assert!(too_soon(Some(ms(1000)), ms(1249)));
         assert!(!too_soon(Some(ms(1000)), ms(1250)));
+        let stone = SoundCue::StoneRise;
+        assert_eq!(repeat_key(stone, Some(Vec2::new(6.5, 109.5))), repeat_key(stone, Some(Vec2::new(6.9, 109.1))), "same cell");
+        assert_ne!(repeat_key(stone, Some(Vec2::new(6.5, 109.5))), repeat_key(stone, Some(Vec2::new(10.5, 109.5))), "another stone");
+        assert_ne!(repeat_key(stone, None), repeat_key(stone, Some(Vec2::ZERO)));
     }
 
     #[test]
@@ -1083,10 +1093,10 @@ mod tests {
         send(&mut app, PlaySound::at(SoundCue::Click, right_of_ear(3.0)));
         send(&mut app, PlaySound::at(SoundCue::Click, right_of_ear(60.0)));
         send(&mut app, PlaySound::flat(Sound::variant(SoundCue::Click, 7)));
-        send(&mut app, PlaySound::flat(SoundCue::Click));
+        send(&mut app, PlaySound::at(SoundCue::Click, right_of_ear(3.0)));
         app.update();
         let spawned = effects(&mut app);
-        assert_eq!(spawned.len(), 1, "far, unknown variant, and the same sound again within 250 ms");
+        assert_eq!(spawned.len(), 1, "far, unknown variant, and the same sound from the same place within 250 ms");
         let (_, voice, settings) = &spawned[0];
         assert_eq!(voice.at, Some(right_of_ear(3.0)));
         assert!(matches!(settings.mode, PlaybackMode::Despawn));

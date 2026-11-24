@@ -131,7 +131,8 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
 - At most 10 effects at once: a full mix cuts its lowest-ranked one for a new one that outranks it (priority, then
   fewer copies of the same sound, then closeness: that order is our reading). A loop only cuts on its first
   start; coming back (next variant, back in reach, after being cut) it waits for a free slot, else loops would
-  keep cutting each other (ours). The same sound never restarts within 250 ms (one-shots).
+  keep cutting each other (ours). The same sound never restarts within 250 ms (one-shots) from the same cell; from another cell it does (ours: a
+  site's stones land a turn apart, the original keys this by sound id alone).
 - An owner (a unit) gets no new sound while one of its sounds plays.
 - Loops: `PlayLoop` under a key, sent again to move it or change its volume (0..1: the ambience layers' weights,
   the battle crowd's loudness), and `StopLoop`. A repeat loop replays the same clip; a variety loop takes a fresh
