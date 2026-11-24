@@ -1,5 +1,6 @@
 //! Things standing on the ground (site stones, later buildings, trees, units): each part has
-//! its own map position and is set on the curved terrain under it, so footprints follow slopes.
+//! its own map position and is set on the curved terrain under it, so footprints follow slopes. A part standing on
+//! land the local player has not explored is not drawn (`fog::hidden_at`).
 
 use crate::camera::{CameraRig, CurveParamsRes};
 use crate::game_frame::{GamePos, GameYaw};
@@ -149,7 +150,7 @@ pub(crate) fn place_grounded(
     mut q: Query<(&Grounded, &mut Transform, &mut Visibility)>,
 ) {
     for (g, mut t, mut vis) in &mut q {
-        match render_pos(&map.0.terrain, g, rig.focus, &params.0) {
+        match render_pos(&map.0.terrain, g, rig.focus, &params.0).filter(|_| !crate::fog::hidden_at(&map.0, g.at)) {
             Some(p) => {
                 if t.translation != p {
                     t.translation = p;

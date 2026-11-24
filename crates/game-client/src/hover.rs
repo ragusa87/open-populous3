@@ -2,7 +2,7 @@
 //! (every unit, wood piles, trees, totems, every building, vehicles; never the reincarnation site). Sprites (units, piles) get a
 //! quad behind them that draws only the pixels just outside their silhouette (`hover_outline.wgsl`);
 //! 3D models (trees, buildings) get an inverted hull: their meshes pushed out along the normals, front
-//! faces culled, so only a rim shows around them.
+//! faces culled, so only a rim shows around them. Nothing on land the player has not explored is hovered (fog.rs).
 
 use crate::buildings::BuildingView;
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
@@ -334,6 +334,13 @@ fn detect(
             .collect();
         let vehicle = model_on_screen(c, &afloat).map(|i| ids[i]);
         let swamp = ground.and_then(|at| swamp_at(&map.0, at));
+        let seen = |at: (u16, u16)| !crate::fog::hidden_world(&map.0, at);
+        let wood = wood.filter(|&i| map.0.wood.get(i).is_some_and(|w| seen((w.x, w.z))));
+        let tree = tree.filter(|&i| map.0.trees.get(i).is_some_and(|t| seen((t.x, t.z))));
+        let totem = totem.filter(|&i| map.0.totems.get(i).is_some_and(|t| seen((t.x, t.z))));
+        let building = building.filter(|&i| map.0.buildings.get(i).is_some_and(|b| seen(b.centre())));
+        let vehicle = vehicle.filter(|&id| map.0.vehicle(id).is_some_and(|v| seen((v.x, v.z))));
+        let swamp = swamp.filter(|_| ground.is_some_and(seen));
         pick(unit, vehicle, wood, tree, totem, building, swamp)
     });
     hovered.set_if_neq(Hovered(target));

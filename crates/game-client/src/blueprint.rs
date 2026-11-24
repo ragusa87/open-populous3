@@ -317,7 +317,7 @@ fn draw_blueprint(
     let centre = Vec2::new(cx as f32, cz as f32) / unit;
     let all_red = too_steep(&map.0, &b) || !shore_ok(&map.0, &b) || door_blocked(&map.0, &b, None) || walls_touch(&map.0, &b, None);
     // A map position (cells) -> render position and colour.
-    let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at), None).is_some() { RED } else { WHITE });
+    let vertex = |at: Vec2| (on_ground(at), if all_red || blocked_at(&map.0, world_units(at), None).is_some() || crate::fog::hidden_world(&map.0, world_units(at)) { RED } else { WHITE });
     let mark = mark_mesh(kind, b.facing, centre, vertex);
     look.set_if_neq(CursorLook::Building { plan, valid: !mark.colours.contains(&RED) });
     put_mark_if_changed(&mut commands, mark_entity, mesh, &mut meshes, &mut cache.last, mark);

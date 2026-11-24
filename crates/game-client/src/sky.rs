@@ -106,20 +106,23 @@ fn respawn_dome(
     commands.spawn((SkyDome, Mesh3d(meshes.add(dome_mesh())), MeshMaterial3d(mats.add(material)), NotShadowCaster, Transform::default()));
 }
 
-/// Centred on the eye, opaque near the ground and gone when looking at the planet from space.
+/// Centred on the eye, opaque near the ground and gone when looking at the planet from space, dimmed over unexplored
+/// land (`fog::SkyDim`).
 fn follow_eye(
     rig: Res<CameraRig>,
     eye: Query<&Transform, (With<GameCamera>, Without<SkyDome>)>,
     mut dome: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>), With<SkyDome>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    dim: Res<crate::fog::SkyDim>,
 ) {
     let Ok(eye) = eye.single() else { return };
     let alpha = 1.0 - space_fade(rig.pitch);
+    let colour = dim.apply(Color::WHITE.with_alpha(alpha));
     for (mut t, mut vis, material) in &mut dome {
         t.translation = eye.translation;
         *vis = if alpha > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
-        if let Some(mut m) = mats.get_mut(&material.0) && m.base_color.alpha() != alpha {
-            m.base_color = Color::WHITE.with_alpha(alpha);
+        if let Some(mut m) = mats.get_mut(&material.0) && m.base_color != colour {
+            m.base_color = colour;
         }
     }
 }

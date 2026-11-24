@@ -36,6 +36,7 @@ mod effects;
 mod fire_flame;
 mod flame;
 mod flyby;
+mod fog;
 mod game_end;
 mod game_frame;
 mod game_speed;
@@ -125,7 +126,7 @@ fn main() {
             virtual_cursor::VirtualCursorPlugin,
             grounded::GroundedPlugin,
             sites::SitesPlugin,
-            sky::SkyPlugin,
+            (sky::SkyPlugin, fog::FogPlugin),
             nature::NaturePlugin,
             buildings::BuildingsPlugin,
             campfire::CampfirePlugin,

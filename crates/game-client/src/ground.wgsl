@@ -41,6 +41,9 @@
 // x: terrain_mesh::CurveParams::height_scale (`ground_material::set_height_scale`), the sea's vertex-stage ripple
 // displacement's own render-unit conversion. y, z, w: unused.
 @group(#{MATERIAL_BIND_GROUP}) @binding(13) var<uniform> water_params: vec4<f32>;
+// The local player's explored cells (pop3-rev-analysis.md "Fog of war"): 1 explored, 0 not, grid-vertex-aligned.
+@group(#{MATERIAL_BIND_GROUP}) @binding(14) var fog_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(15) var fog_samp: sampler;
 
 const BIGFADE_WIDTH: i32 = 256;
 const BIGFADE_ROWS: i32 = 1152;
@@ -342,6 +345,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // `disp`/`light`/`brightness` are no longer needed here: `land_colour`/`water_colour` (below) each compute
     // their own - only `walk` (the branch pick) is shared.
     let walk = textureSample(channels_tex, channels_samp, cell_uv).a;
+    let explored = textureSample(fog_tex, fog_samp, cell_uv).r;
     // A wide, organic colour blend between `land_colour` and `water_colour` (2026-10-23; terrain-textures.md
     // "coast"). `COAST_BLEND_WIDTH` is the blend's own half-width in `walk` units; `COAST_BLEND_JITTER` perturbs
     // the blend's own centre with the SAME `disp` noise `land_colour` already reads, so the line wobbles/frays
@@ -376,6 +380,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let t = smoothstep(lo, hi, walk);
         colour = mix(water, land, t);
     }
+
+    colour = colour * explored;
 
     if (grid_on > 0.5) {
         let gx = fract(x);

@@ -359,8 +359,8 @@ pub fn sky_for_pitch(pitch: f32) -> Color {
     SKY.mix(&SPACE, space_fade(pitch))
 }
 
-fn sky_color(rig: Res<CameraRig>, mut clear: ResMut<ClearColor>) {
-    clear.0 = sky_for_pitch(rig.pitch);
+fn sky_color(rig: Res<CameraRig>, dim: Res<crate::fog::SkyDim>, mut clear: ResMut<ClearColor>) {
+    clear.0 = dim.apply(sky_for_pitch(rig.pitch));
 }
 
 #[derive(Resource)]

@@ -158,10 +158,15 @@ fn resolve_arg_path(arg: &str, fallback_dir: Option<&Path>, exists: &dyn Fn(&Pat
     p
 }
 
-/// `map` as a new game, with its own seed: `GAME_SEED` if set (to replay a game), else drawn from the clock.
+/// `map` as a new game, with its own seed: `GAME_SEED` if set (to replay a game), else drawn from the clock; `FOG=1`
+/// turns fog of war on (`fog::forced`).
 pub fn new_game(map: GameMap) -> GameMap {
     let seed = std::env::var("GAME_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or_else(clock_seed);
-    map.seeded(seed)
+    let mut map = map.seeded(seed);
+    if map.fog.is_none() && crate::fog::forced() {
+        map.enable_fog();
+    }
+    map
 }
 
 fn clock_seed() -> u32 {

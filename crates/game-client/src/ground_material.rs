@@ -134,6 +134,13 @@ pub struct GroundMaterial {
     /// already uses. y, z, w: unused.
     #[uniform(13)]
     pub water_params: Vec4,
+    /// The local player's explored cells (R8Unorm, 255 explored, 0 not: `fog_bytes`): bilinear, repeat-wrapped,
+    /// grid-vertex-aligned like `channels`, so each corner takes its own cell's brightness and unexplored land fades
+    /// to black over one cell (pop3-rev-analysis.md "Fog of war" "Drawing"). All white without fog; always map-sized,
+    /// so a reveal rewrites it in place (`fog::sync_ground_fog`) instead of swapping in an image not uploaded yet.
+    #[texture(14)]
+    #[sampler(15)]
+    pub fog: Handle<Image>,
 }
 
 impl Material for GroundMaterial {
@@ -229,7 +236,18 @@ pub fn placeholder(images: &mut Assets<Image>) -> GroundMaterial {
         water: images.add(image((1, 1), TextureFormat::R8Unorm, vec![0], filterable_sampler())),
         highlight: Vec4::ZERO,
         water_params: Vec4::new(crate::terrain_mesh::BASE_HEIGHT_SCALE, 0.0, 0.0, 0.0),
+        fog: images.add(fog_image(pop3_format::level::MAP_SIZE as u32, fog_bytes(None, pop3_format::level::MAP_SIZE))),
     }
+}
+
+/// One byte per cell of a `size` x `size` map, row by row: 255 where `explored` (None: no fog, everywhere), 0 elsewhere.
+pub fn fog_bytes(explored: Option<&game_core::fog::Explored>, size: usize) -> Vec<u8> {
+    (0..size * size).map(|i| if explored.is_none_or(|e| e.is_explored(((i % size) as i32, (i / size) as i32))) { 255 } else { 0 }).collect()
+}
+
+/// The fog texture of `bytes` (`fog_bytes`), `side` cells across.
+pub fn fog_image(side: u32, bytes: Vec<u8>) -> Image {
+    image((side, side), TextureFormat::R8Unorm, bytes, filterable_sampler())
 }
 
 /// Replaces every texture (a new theme or level: `world::rebuild_terrain`'s own "no bake yet" branch) and the
@@ -290,6 +308,17 @@ mod tests {
         assert_eq!(params(128, false).y, 0.0);
     }
 
+    #[test]
+    fn fog_bytes_light_explored_cells_only_and_everything_without_fog() {
+        assert_eq!(fog_bytes(None, 2), vec![255; 4]);
+        let mut e = game_core::fog::Explored::new(4);
+        e.explore((1, 2));
+        let bytes = fog_bytes(Some(&e), 4);
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(bytes.iter().filter(|&&b| b == 255).count(), 1);
+        assert_eq!(bytes[2 * 4 + 1], 255);
+    }
+
     fn test_material() -> GroundMaterial {
         GroundMaterial {
             params: params(128, true),
@@ -302,6 +331,7 @@ mod tests {
             water: Handle::default(),
             highlight: Vec4::ZERO,
             water_params: Vec4::ZERO,
+            fog: Handle::default(),
         }
     }
 
