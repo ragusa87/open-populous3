@@ -733,7 +733,8 @@ fn run_loops(
     }
 }
 
-/// A new track (or none): the old one and its drums fade out, a drum bank is drawn for the new one.
+/// A new track (or none): the old one and its drums fade out, a drum bank is drawn for a game track (none behind
+/// the menus).
 fn play_music(
     mut out: Output,
     mut requests: MessageReader<PlayMusic>,
@@ -760,7 +761,7 @@ fn play_music(
             continue;
         };
         let seed = draws.next();
-        let bank = (!library.drums.is_empty()).then(|| (draws.next() % library.drums.len() as u64) as usize);
+        let bank = (track == MusicTrack::Game && !library.drums.is_empty()).then(|| (draws.next() % library.drums.len() as u64) as usize);
         *drums = Drums { bank, intensity: drums.intensity, ..Drums::default() };
         let result = resolve_music(library.pick_music(track, seed), &mixer, out.on());
         out.log(|| describe_music(&format!("track={track:?}"), &result));
@@ -1176,14 +1177,18 @@ mod tests {
     #[test]
     fn music_plays_its_track_and_chains_drums_from_the_fighting() {
         let mut app = app(true, library(&[1]));
-        send(&mut app, PlayMusic(Some(MusicTrack::Menu)));
-        app.update();
         let roles = |app: &mut App| {
             let mut r: Vec<String> = voices(app).iter().map(|v| format!("{:?}", v.1.role)).collect();
             r.sort();
             r
         };
-        assert_eq!(roles(&mut app), vec!["Drum", "Track"]);
+        send(&mut app, PlayMusic(Some(MusicTrack::Menu)));
+        app.update();
+        assert_eq!(roles(&mut app), vec!["Track"], "no drums behind the menus");
+        send(&mut app, PlayMusic(Some(MusicTrack::Game)));
+        app.update();
+        assert_eq!(roles(&mut app), vec!["Drum", "Track"], "the game track and its drums");
+        assert_eq!(fading(&mut app), 1, "the menu track fades out");
         let drum = voices(&mut app).into_iter().find(|v| v.1.role == Role::Drum).unwrap();
         assert!(matches!(drum.2.mode, PlaybackMode::Despawn), "each drum loop ends, the next is chosen");
         send(&mut app, SetIntensity(Intensity::Melee));
@@ -1195,10 +1200,6 @@ mod tests {
             s.next(Intensity::Melee, 4);
             s
         });
-        send(&mut app, PlayMusic(Some(MusicTrack::Game)));
-        app.update();
-        assert_eq!(roles(&mut app), vec!["Drum", "Track"], "the new track and its drums");
-        assert_eq!(fading(&mut app), 2, "the old track and drums fade out");
         send(&mut app, PlayMusic(None));
         app.update();
         assert!(voices(&mut app).is_empty());

@@ -138,8 +138,8 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
   variant each time one ends, and when stopped lets the current one finish.
 - While the game is paused only sounds flagged for it start or go on; behind a menu only flat sounds; music always.
 - Stopped sounds fade out: effects in 0.1 s, music in 1.5 s (lengths ours, the original's not traced).
-- Music: a Menu track behind the menus, a Game track in a game picked at random among its variants; each time it
-  starts a random drum bank is drawn and its loops chained by the fight intensity (`SetIntensity`, rules in
+- Music: a Menu track behind the menus, a Game track in a game picked at random among its variants; each time a
+  Game track starts a random drum bank is drawn (none behind the menus: the Menu track plays alone) and its loops chained by the fight intensity (`SetIntensity`, rules in
   "Music and drums"; which melee loop counts as every 4th is our reading). A new drum loop starts the frame
   after one ends: a small gap, not sample-exact.
 - Loaded from the install at startup (`audio_load.rs`, nothing with `--no-original`): `PopDrones22` entry 0 as
