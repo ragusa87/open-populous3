@@ -2069,22 +2069,38 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   variety loops with a live volume, one sound at a time per owner, drum loops chained under the music by the
   fight intensity, fade-outs, the pause/menu rules, the original's listener, 48-cell cut-off, `1 - d²/D²`
   falloff and equal-power balance, 10 effects at most, 250 ms between repeats, `--mute`, `--debug-audio`. The
-  library is empty: nothing plays yet. The low-quality bank is left out on purpose.
-- [ ] Fill the `SoundLibrary`: music (`PopDrones22`, Layer II through symphonia) and the drum banks are loaded
-  (`audio_load.rs`). Left: `Soundd2` entries (`Entry::wav`) through the sound id -> entry-range table (volume,
-  priority, while-paused flag), the `POPfightnew.SDT` alternative ranges, CC0 sounds for `--no-original`.
-  **Question for a spec session**: the per-id record table itself (sound.md "Sound ids") is not in docs/ - its
-  229 rows (first entry, variant count, fight-bank range, priority, volume, while-paused) are needed before any
-  SFX can be wired.
-- [ ] Play SFX from game events: spells, chopping, building, ambience layers, the battle crowd, casting shouts
-  (`Sv_*`/`En_Sv_*`), deaths; selection/order voices, flyby start/cancel and the menu click are wired
-  (`audio_cues.rs`, families by entry name - a guess until the sound id table is documented, see the item above);
-  the fight flag into `SetIntensity` (done as a guess: scaled by the player's people engaged, calm silent -
-  sound.md "Playback in the client"; replace by the original's flag, or keep the scaling and tune `MELEE_ARMY`,
-  once heard in play). Work sounds on their animation frame, the clips' own loop points, reverb,
-  drum loops chained without a frame's gap.
-  Triggers are now mapped (sound.md "How the original plays them"): play by sound id through the id -> entry-range
-  table, not by bank index; looping sounds need explicit stops; music = drone track + intensity-driven drum loops.
+  library is filled from the install (next item). The low-quality bank is left out on purpose.
+- [ ] Fill the `SoundLibrary`: music (`PopDrones22`, Layer II through symphonia), the drum banks and `Soundd2`
+  through the sound id table (sound.md "Sound id table", `audio_ids.rs`: entry ranges, volume, priority) are
+  loaded. Left: the fight bank `POPfightnew.SDT` (punches, swords, yells, hit grunts: the table gives their names
+  but not their entry indices in that bank - **question for a spec session**), CC0 sounds for `--no-original`.
+- [ ] Play SFX from game events: people (deaths, drowning, screams, landing grunts, cast shouts, burning,
+  conversion, invisibility), work, spell effects, shots, vehicles, burning and finished buildings, the battle
+  crowd and the shield hum are wired by the id table's triggers (`audio_world.rs`), with the selection/order voices,
+  flyby, menu click and site stones (`audio_cues.rs`); sound.md "Playback in the client" lists them. Guesses, tagged
+  in code and sound.md:
+  - work sounds every 8 turns of the work (`WORK_EVERY`) rather than on their animation's sync frame (the client
+    sees no animation frame: give the sim or the views the frame, then play on it, the sync frame dropped if the
+    animation changes first);
+  - the cast shout as the cast starts, not at the spell's launch;
+  - the shield hum within 48 cells of the listener for "drawn near the camera";
+  - the lava loop runs to the effect's end (the original stops it once the flow stops growing);
+  - voice stealing still ranks priority, copies, closeness in that order: replace by the original's score
+    (sound.md "Sound id table": priority x 256 halved per 16 steps of remoteness, halved per copy);
+  - **conflict for a spec session**: `0xCF` is a person's low-health loop in pop3-rev-analysis.md "Statuses" but
+    `tweets` on a contented building in the id table; nothing plays it until settled.
+  Not wired yet (no client-side state for them): a hut's birth (`0x28`, local player), a whirlwind's wood crack and
+  branch snap (`0x12`, `0xD4`), the building creak (`0x34`), Firestorm's falling fireballs (`0xB3`) and the
+  volcano's rocks (`0xBC`), a fireball into the sea (`0x55`), the sermon voices (`0x33`, `0xBD`), the Angel of
+  Death's roar, wing flaps and spawn voice (`0xDC`, `0xDB`, `0xD8`), the reincarnation site's prep and sinking
+  pillars (`0x9E`, `0xC5`), the guard post loop (`0xC0`), the fight alarm (`0x23`), the battle cries and melee
+  blows (fight bank), the soul swirls (`0xD0`, `0xD1`), the shaman's return (`0x6B`), discoveries, the panel's
+  clicks (placement, rotate, wrong, spell/building buttons, page turn, bookmarks, message icons), `noentry`.
+  Left besides: the ambience bed and its random one-shots (sound.md "Sound id table": five weighted slots by
+  theme, seagulls, wildlife), the fight flag into `SetIntensity` (done as a guess: scaled by the player's people
+  engaged, calm silent - sound.md "Playback in the client"; replace by the original's flag, or keep the scaling and
+  tune `MELEE_ARMY`, once heard in play), the clips' own loop points, reverb, drum loops chained without a frame's
+  gap.
 
 ### Art ([assets.md](docs/specs/assets.md))
 - [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).

@@ -122,7 +122,7 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
 - Channels: Music and Fx under a Master volume, plus Mute all (saved). UI sounds go on Fx, flat: centred, full
   volume.
 - A `SoundCue` stands for one of the original's sound ids: a family of variants with its own volume (0-127),
-  priority and "plays while paused" flag. `Pick::Any` is the original's random pick; `Pick::Variant(n)` plays
+  priority and "plays while paused" flag (the id's, sound.md "Sound id table"). `Pick::Any` is the original's random pick; `Pick::Variant(n)` plays
   exactly variant `n` (`chop4`), never another one in its place.
 - Mixed as the original mixes them: the listener 16 cells from the camera's look-at point along its heading, 2D
   distances on the wrapped map, a cut-off at 48 cells (not started past it, faded out once out of it), the volume
@@ -150,16 +150,45 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
 - Loaded from the install at startup (`audio_load.rs`, nothing with `--no-original`): `PopDrones22` entry 0 as
   the Menu track and entries 1-4 as the Game variants, their raw Layer II streams decoded by symphonia; the ten
   drum banks, each entry as a WAV (entry 0 included, played as stored).
-- `Soundd2` cues, ours until the sound id table is in these docs: each cue plays a family of entries found by name
-  (`audio_load::family_name`: the name, then digits only), at full volume and priority 0. Wired (`audio_cues.rs`):
-  the selection's bow lines and the order answers as in "Voices" (crowd sizes the bank lacks fall back to the
-  largest it has: followers 1/2/3, spies 1/2), the flyby's start (`Zoom_in`) and cancel (`Zoom_out`), the menu
-  click (`confirm`) and a reincarnation site's stones rising (`rokrise`, at the stone, every second stone as
-  "Pillars" [exe] says for sound 0x9F) and each stone head grinding once per nod as it tips forward (`Stonehead`,
-  every 1.6 s at the head: ours, no stone head sound is traced) - those five picked by name alone.
-- Not done yet: the other SFX (casting shouts, deaths, work sounds, spells, ambience), the per-id volume, priority
-  and while-paused flag, the fight bank's alternative ranges, CC0 sounds for `--no-original`, the clips' own loop points (`fire`, `warloop`...), work sounds waiting for an animation
-  frame, ambience layers, reverb, game events turned into cues (the fight flag for the intensity).
+- `Soundd2` cues through the sound id table ("Sound id table", `audio_ids.rs`): each `SoundCue` names its id
+  (`SoundCue::id`), plays a random entry of that id's range with the id's volume and priority; the info-window
+  click (`confirm`) plays while paused. Ids with no sample stay silent, and the spells past armageddon (shield,
+  teleport, bloodlust) have no shout. Not used: the fight bank (`POPfightnew.SDT`, its ids' ranges are not in
+  the table), the sync frames.
+- Interface and voices (`audio_cues.rs`): the selection's bow lines and the order answers by type and crowd size
+  1/2/3/4+ (wildmen count as followers), the flyby's start (`0x6F`) and cancel (`0x6E`), the menu click
+  (`0x6A`), a reincarnation site's stones rising (`0x9F`, every second stone, "Pillars" [exe]) and each stone
+  head talking once per nod as it tips forward (`0xC1`; the original on its animation's key frame).
+- Game events (`audio_world.rs`), each system comparing the map with what it saw last frame (nothing sounds for
+  what is there when a map loads), by the triggers of the id table:
+  - People: the death cry, the shaman's own by tribe, a ghost's poof (the Angel of Death none: its roar `0xDC`
+    and wing flaps are not wired); the drowning cry; a scream when thrown (a shaman at any speed, by tribe; the
+    others only rising faster than 90) or sucked into a whirlwind; a grunt for a throw ending standing after
+    falling at -100 or faster (the shaman's own; a wildman none); the casting shaman's shout by tribe (ours: as her
+    cast starts, the original's at the spell's launch); a wildman converted (`0x05`); turning invisible (once per
+    sweep) and visible again.
+  - Per turn, owned by the person (one at a time each, so it carries on): burning (`0x51`), eating and drinking
+    (each half the time one of its two ids), a wildman's mutter (1 in 256 turns idle). Work, every `WORK_EVERY`
+    (8) turns of it, ours for the original's one per animation cycle on its sync frame: chopping and hacking at a
+    building (`0x01`), picking up wood (`0x0A`), hammering (`0x14`), levelling a foundation (`0x02`).
+  - Effects appearing: a splash, an explosion or a panicking blast (`0xB2`), a simple blast (`0xA1`), lightning,
+    ghost army, land bridge (two ids), the angel's cast and meteor launch, its shockwave (`0xDA`), flatten,
+    convert, hypnotism, a spy's firebrand, a ground fire catching (`0xB6`). Loops while they live: variety for the
+    whirlwind (stopped under 12 turns left), the swarm, the swamp, the ground fire; the same sample for erosion,
+    the earthquake, the volcano and the lava (the original stops the lava's once its flow stops growing: not
+    modelled). The earthquake cracks (`0x15`) halfway, the volcano's cone rising (`0xB0`) halfway.
+  - Shots launched whoosh (`0xA1`): Blast's fireball, a firewarrior's bolt.
+  - Vehicles: the moving loop from setting off to parking; going down or up wrecked, or gone without that,
+    `boatexp`/`bloonpop`.
+  - Buildings: the burning crackle while its countdown is above 79; the bell when one is finished.
+  - The battle crowd (flat repeat loop): the summed closeness (0..1) of the fights after the 6th, in the
+    coordinators' order, capped at 1. The shield hum (flat repeat loop) while a shielded person is alive within
+    48 cells of the listener (ours for "drawn near the camera").
+- Not done yet: the fight bank and the melee moves' sounds, CC0 sounds for `--no-original`, the clips' own loop
+  points (`fire`, `warloop`...), work sounds on their sync frame, the ambience bed and its random one-shots
+  (seagulls, wildlife), reverb, the original's fight flag for the drums, and the triggers with no client-side
+  state yet (birth, a whirlwind's wood crack and branch snap, a building creaking, the fight alarm, the interface
+  clicks of the panel, discoveries, the soul swirls).
 
 ## PopSoundEditor discrepancies
 The editor works on its own exports but misreads parts of the format. Do not copy these:
@@ -178,7 +207,7 @@ The editor works on its own exports but misreads parts of the format. Do not cop
 
 ## How the original plays them
 From the original exe (pop3-rev-analysis.md would hold the formal spec; the full per-id trigger list is in "Sound id
-table" below). Not implemented yet.
+table" below).
 
 ### Sound ids
 - The game plays a **sound id** (0x00-0xE4), never a bank index. A per-id record gives: first entry and variant

@@ -1719,6 +1719,12 @@ impl Unit {
         }
     }
 
+    /// The book spell her cast jump releases, while she casts (read by the client for the cast shout, sound.md
+    /// "Voices").
+    pub fn casting(&self) -> Option<crate::spell_book::SpellKind> {
+        matches!(self.action, Action::Casting { .. }).then_some(self.spell).flatten().and_then(|s| s.kind())
+    }
+
     /// One of the 3 taunts (combat.md "Challenge"), the turn it started.
     pub fn taunted(&self) -> Option<(Tick, u8)> {
         self.taunted

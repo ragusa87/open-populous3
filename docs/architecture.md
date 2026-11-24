@@ -159,7 +159,7 @@ the views, never hard-coded in the client: e.g. a future `Effect::volcano_phase(
 flowing) that `VolcanoView` reads to start the camera shake and the rock spray.
 
 ## Client: audio
-Sound is client-only: the simulation never knows about it, so lockstep is untouched. Six files:
+Sound is client-only: the simulation never knows about it, so lockstep is untouched:
 - `audio_mix.rs`: the `Mixer` resource, a `Level` (0-100 %) for Master, Music and Fx, and Mute all.
   `Mixer::gain(channel)` = (master x channel)^2, 0 while muted.
 - `audio_space.rs`: how a sound on the map is heard (sound.md "Playback in the client"): the listener ahead of the
@@ -177,6 +177,10 @@ Sound is client-only: the simulation never knows about it, so lockstep is untouc
   sound is a `Voice` (an effect, the track or a drum loop); every frame `apply_voices` sets its gains, fades
   out what was stopped (`Fading`), fades out what left the reach (a loop restarts once back in reach), and
   holds effects while the game is not running. `audio_drums.rs` picks each next drum loop.
+- `audio_cues.rs` and `audio_world.rs`: what asks for sounds. The first, interface moments (selection, orders,
+  flyby, site stones); the second, the map's events, each system comparing what it sees with last frame's (a
+  person's phase, effects and buildings appearing or gone, vehicles under way, fights and shields in reach).
+  `audio_load.rs` fills the library, each cue from its sound id's entries (`audio_ids.rs`, the id table).
 - `user_settings.rs`: the volumes and Mute all, as JSON in the platform config dir
   (`dirs::config_dir()/open-populous/settings.json`, `POP3_CONFIG_DIR` overrides), read at launch, saved on
   leaving the Audio page (main and pause menus), never by a headless run.
