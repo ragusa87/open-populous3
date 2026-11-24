@@ -19,6 +19,7 @@
   - [building kit](../assets/3d/buildings/README.md): reproducible glTF generation, Blender preview and licence.
   - [constants.md](specs/constants.md): balance values (`constant.dat`), its XOR encoding and text format.
   - [pop3-rev-analysis.md](specs/pop3-rev-analysis.md): original engine internals from the executable: unit model, tribes, constant table, mana.
+  - [fog-of-war.md](specs/fog-of-war.md): explored land per human tribe, what reveals it, what it hides and forbids.
   - [worship.md](specs/worship.md): praying at pyramids of knowledge and totems, their gauges and rewards.
   - [outcome.md](specs/outcome.md): winning and losing, tribes and alliances, Armageddon.
   - [tooltips.md](specs/tooltips.md): what the game shows about the thing under the mouse: slot rows, bars, toggle.

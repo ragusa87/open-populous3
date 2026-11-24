@@ -61,7 +61,7 @@ Burn (model 1) and Raise (the editor's own terrain brush) are internal mechanics
 
 | Area | Status | Notes |
 |---|---|---|
-| Terrain / world engine | Partial | Original levels parse and render: wrapping heightmap, curved "planet" mesh, theme-accurate ground textures, dirty-rect re-bakes. Known disparities still to address: projection, cell/selection highlighting, beatbox and flyleaf effects. **Frog and war frog are not implemented.** See [terrain.md](specs/terrain.md), [terrain-textures.md](specs/terrain-textures.md). |
+| Terrain / world engine | Partial | Original levels parse and render: wrapping heightmap, curved "planet" mesh, theme-accurate ground textures, dirty-rect re-bakes. Known disparities still to address: projection, cell/selection highlighting, beatbox and flyleaf effects. Fog of war implemented ([fog-of-war.md](specs/fog-of-war.md)). See [terrain.md](specs/terrain.md), [terrain-textures.md](specs/terrain-textures.md). |
 | Winning and losing | Done (core) | Automatic elimination/outcome detection, victory/defeat screen, end-of-match freeze and winner's shield all implemented. Level-script-triggered win/lose waits on the scripting interpreter (Priority 2). |
 | Things and level data | Partial | Things and triggers partially parsed and placed. Open: level names/language texts, object banks other than 0, start camera from the header, sunlight block. See [level-format.md](specs/level-format.md), [objects.md](specs/objects.md). |
 

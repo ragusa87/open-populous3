@@ -64,7 +64,7 @@ each kind of object in a fixed, written order. The original's order inside a tur
 6. vehicles (`tend_vehicles`, docs/specs/vehicles.md: their passengers carried along), healing on its rhythm
    (`HEAL_EVERY`), units (`Unit::tick`), then their events (wood, work, doors) in unit order;
 7. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
-   its spell book), the gone units removed.
+   its spell book), the land the human tribes uncovered (`tend_fog`, fog-of-war.md), the gone units removed.
 
 Rules for every object that ticks:
 - **One typed list per kind** on `GameMap` (`trees`, `units`, `effects`...), no trait objects. Each kind has its own

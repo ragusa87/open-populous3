@@ -6359,8 +6359,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   between them) if it recurs, though the trace doesn't show it changing the broad shape (channels one cell wide,
   not a flood fill, either way). `Lava::effect()` (Earthquake's static fissure) matches "lava square" structurally
   but has the same instant-kill issue and no decay-then-self-destruct-then-ash behaviour.
-- level-format.md / `pop3_format::header::LevelFlags::FOG_OF_WAR`: the flag is parsed but nothing uses it, and
-  effect 81 "reveal fog area" does nothing. The original ("Fog of war"): one permanent explored bit per cell for
+- Fog of war (fog-of-war.md), implemented since: one grid per human tribe instead of the local player's only (for
+  lockstep), checked every turn instead of on entering a cell (same result), the site's disc 7 skipped (inside disc
+  14); not yet the special level without fog, the portal's reveal, texts 0x349/0x24E, the sea polygons left out.
+  Before it: the flag was parsed but nothing used it, and effect 81 "reveal fog area" did nothing. The original ("Fog of war"): one permanent explored bit per cell for
   the local player, cleared at level load; reveal disc 5 (cells closer than 6) around a player unit (person,
   boat, balloon, angel) whenever it enters a cell with an unexplored cell among its own and the 4 ahead; disc 14
   then 7 at the player's reincarnation site at start; effect 81 and the portal reveal a 3x3 block of disc-5s;

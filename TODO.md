@@ -1788,19 +1788,17 @@ Level/world correctness that is mostly stable already (terrain especially: exten
 
 ### Things and level data ([level-format.md](docs/specs/level-format.md), [objects.md](docs/specs/objects.md))
 - [x] Start camera from the header's start position (cell) and angle (2048ths): `camera::start_view`.
-- [ ] Fog of war (level flag 0x01, levels 9 and 18), from pop3-rev-analysis.md "Fog of war": a permanent
-  per-cell "explored" bit for the local player only, all clear at level start, never cleared again (a shroud,
-  not line of sight). Reveal a disc of radius 5 (the cells closer than 6 cells: 109 cells, 11 across) around a
-  player person, boat, balloon or angel each time it enters a new cell and its own cell or one of the 4 cells
-  straight ahead is unexplored (also at once for a person converted or hypnotised to the player); at start a
-  disc 14 then 7 around the player's reincarnation site; effect 81 "reveal fog area" (placed in the level, at
-  load when no trigger points at it, else when its trigger fires, e.g. praying at a stone head) and the portal
-  scenery reveal a disc 5 around each cell of their 3x3 block, the effect then deletes itself; Armageddon reveals
-  its 11-cell arena. Same sight for every unit type. Draw unexplored terrain black with a one-cell soft edge, do
-  not draw anything standing or flying over unexplored cells (whoever owns it), no minimap dots there, tooltip
-  "Fog of War: Unexplored land hidden by fog."; dim the sky colours by min(1, explored cells on screen / 50) in
-  sixteenths; fog stays off on the special "level 99"; refuse building footprints over unexplored cells ("Can't Build,
-  Fog of War"); the player's braves ignore trees on unexplored cells. Spotting, targeting and combat ignore fog.
+- [x] Fog of war (level flag 0x01, levels 9 and 18): [fog-of-war.md](docs/specs/fog-of-war.md). Explored land per
+  human tribe, revealed by people, vehicles, angels, the site, effect-81 things (at load or as a totem's gift) and
+  Armageddon; no building over it, no wood fetched from it; unexplored ground black with a soft edge, nothing on it
+  drawn or hovered, the sky dimmed. Left:
+  - [ ] Fog stays off on the special "level 99" (pop3-rev-analysis.md "Fog of war": which level it is is unknown).
+  - [ ] The portal (scenery 14) reveals its 3x3 block of disc 5 when created: no portal scenery yet.
+  - [ ] Mouse-over an unexplored cell: lang00 text 0x349, and the build refusal's own reason, text 0x24E (we only
+    draw the footprint red); needs the language texts in the client (language.md).
+  - [ ] The animated sea polygons are not drawn while fog is on: our sea ripple stays.
+  - [ ] Whether hidden units can be clicked (pop3-rev-analysis.md "Open questions"): ours cannot be hovered.
+  - [ ] Our sky's "in view" is the cells within 12 of the camera focus, a guess at the patch the original draws.
 - [ ] Level flags: shaman omni (0x02, level 25; `GameMap::shaman_omni`: spells start from the view and have no range, the rest of god mode to find), no guest spells (0x10), no reincarnation time (0x20).
 - [x] Default allies per tribe (`.hdr` 92) read into `game_core::tribes::Tribes` and used for: elimination/win-lose
   grouping by side, and the two places that gate whether an attack may start (`attack::attack_goal`,
