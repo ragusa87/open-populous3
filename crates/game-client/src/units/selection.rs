@@ -169,6 +169,12 @@ pub fn settle_gesture(gesture: Gesture, catches_nobody: impl FnOnce(Vec2, Vec2) 
     }
 }
 
+/// `POP3_DEBUG_SELECTION=1`: one log line per click, gesture and selection change.
+fn debug_selection() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("POP3_DEBUG_SELECTION").is_ok_and(|v| v == "1"))
+}
+
 /// Left button press, from press to release.
 #[derive(Resource, Default, Debug, Clone, PartialEq)]
 pub struct Drag {
@@ -289,7 +295,16 @@ pub(super) fn select_and_order(
     selection.retain(&map.0.units);
     if selection.units != before {
         patrol_session.0 = None;
+        if debug_selection() {
+            for id in before.iter().filter(|id| !selection.units.contains(id)) {
+                match map.0.unit(*id) {
+                    Some(u) => info!("selection: dropped {id:?} {:?} alive={} locked={} thrown={} action={:?} motion={:?}", u.kind, u.is_alive(), u.locked(), u.thrown(), u.action, u.motion),
+                    None => info!("selection: dropped {id:?}, gone from the map"),
+                }
+            }
+        }
     }
+    let frame_start = selection.units.clone();
     let cursor = windows.iter().next().and_then(Window::cursor_position);
     let over_ui = ui.iter().any(|i| *i != Interaction::None);
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none() && !blueprint.is_active());
@@ -312,6 +327,14 @@ pub(super) fn select_and_order(
     if let (true, Some(c)) = (mouse.just_pressed(MouseButton::Left), on_map) {
         drag.press(c);
     }
+    if debug_selection() {
+        if mouse.just_pressed(MouseButton::Left) {
+            info!("selection: left press at {cursor:?} on_map={} over_ui={over_ui} spell={:?} blueprint={}", on_map.is_some(), spell.0, blueprint.is_active());
+        }
+        if mouse.just_pressed(MouseButton::Right) {
+            info!("selection: right press at {cursor:?} on_map={} tree={:?}", on_map.is_some(), tree.tree);
+        }
+    }
     let gesture = match cursor {
         Some(c) if mouse.just_released(MouseButton::Left) => drag.release(c),
         Some(c) => {
@@ -324,7 +347,16 @@ pub(super) fn select_and_order(
     let mut ordered = false;
     if let Some(cam) = gesture.and_then(|_| cams.iter().next()) {
         let units = on_screen(&map.0, &views, cam);
-        match gesture.map(|g| settle_gesture(g, |a, b| in_box(a, b, &units).is_empty())) {
+        let settled = gesture.map(|g| settle_gesture(g, |a, b| in_box(a, b, &units).is_empty()));
+        if debug_selection() {
+            let hit = match settled {
+                Some(Gesture::Click(c)) => format!("unit under cursor {:?}", unit_at(c, &units).map(|u| u.id)),
+                Some(Gesture::Box(a, b)) => format!("box catches {:?}", in_box(a, b, &units).iter().map(|u| u.id).collect::<Vec<_>>()),
+                None => String::new(),
+            };
+            info!("selection: left release {gesture:?} -> {settled:?}, {hit}, ctrl={add} shift={shift} alt={alt}");
+        }
+        match settled {
             Some(Gesture::Box(a, b)) => {
                 selection.select_box(&in_box(a, b, &units), add);
                 patrol_session.0 = None;
@@ -385,6 +417,10 @@ pub(super) fn select_and_order(
         }
     }
     ordered |= !orders.is_empty() && !selection.units.is_empty();
+    if debug_selection() && (selection.units != frame_start || !moves.is_empty() || !orders.is_empty()) {
+        let describe = |ids: &[UnitId]| ids.iter().map(|&id| format!("{id:?}:{:?}", map.0.unit(id).map(|u| u.kind))).collect::<Vec<_>>().join(" ");
+        info!("selection: [{}] -> [{}], {} commands, ordered={ordered}", describe(&frame_start), describe(&selection.units), moves.len() + orders.len());
+    }
     if ordered {
         sel.ordered.write(crate::audio_cues::Ordered);
     }
