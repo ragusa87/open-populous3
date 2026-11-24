@@ -26,6 +26,9 @@ use game_core::unit::{Order, PickableUnit, Target, Unit, UnitId};
 pub const DRAG_PX: f32 = 6.0;
 /// A click hits a unit within this many pixels of its feet-to-head line.
 pub const HIT_PX: f32 = 10.0;
+/// Below this diagonal (pixels) a box that catches nobody was a click that wobbled (the cursor follows raw mouse
+/// motion, sped up): ours.
+pub const CLICK_SLOP_PX: f32 = 24.0;
 /// Height of a unit's hit line, in cells (the shaman sprite is ~0.39 cell tall).
 pub const UNIT_HEIGHT: f32 = 0.4;
 const BOX_BORDER: Color = Color::srgba(1.0, 1.0, 0.95, 0.85);
@@ -152,6 +155,14 @@ fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
 pub enum Gesture {
     Click(Vec2),
     Box(Vec2, Vec2),
+}
+
+/// A box under `CLICK_SLOP_PX` that catches nobody is the click at its start; anything else stays as it is.
+pub fn settle_gesture(gesture: Gesture, catches_nobody: impl FnOnce(Vec2, Vec2) -> bool) -> Gesture {
+    match gesture {
+        Gesture::Box(a, b) if a.distance(b) < CLICK_SLOP_PX && catches_nobody(a, b) => Gesture::Click(a),
+        g => g,
+    }
 }
 
 /// Left button press, from press to release.
@@ -309,7 +320,7 @@ pub(super) fn select_and_order(
     let mut ordered = false;
     if let Some(cam) = gesture.and_then(|_| cams.iter().next()) {
         let units = on_screen(&map.0, &views, cam);
-        match gesture {
+        match gesture.map(|g| settle_gesture(g, |a, b| in_box(a, b, &units).is_empty())) {
             Some(Gesture::Box(a, b)) => {
                 selection.select_box(&in_box(a, b, &units), add);
                 patrol_session.0 = None;
@@ -821,6 +832,15 @@ mod tests {
         s.select_box(&[at(2, 0.0)], false);
         s.select_only(Id::from_raw(9));
         assert_eq!(s.units, [9].map(Id::from_raw), "the panel preview selects the shaman alone");
+    }
+
+    #[test]
+    fn a_small_empty_box_is_the_click_it_wobbled_from() {
+        let (a, near, far) = (Vec2::new(100.0, 100.0), Vec2::new(110.0, 104.0), Vec2::new(200.0, 160.0));
+        assert_eq!(settle_gesture(Gesture::Box(a, near), |_, _| true), Gesture::Click(a));
+        assert_eq!(settle_gesture(Gesture::Box(a, near), |_, _| false), Gesture::Box(a, near), "it caught someone");
+        assert_eq!(settle_gesture(Gesture::Box(a, far), |_, _| true), Gesture::Box(a, far), "a deliberate empty box");
+        assert_eq!(settle_gesture(Gesture::Click(a), |_, _| true), Gesture::Click(a));
     }
 
     #[test]
