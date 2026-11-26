@@ -6349,7 +6349,8 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   drawn, and the brave keeps the wildman's id. Sites built from the start (no ritual) still welcome the ring of
   cells around them at load (`ReincarnationSite::welcomes`).
 - The levelling's sparkles: a spiral of 32 sparkles widening 160 a turn to 4 cells, each leaving 6-turn small
-  sparkles (see "Levelling"); ours draws none.
+  sparkles (see "Levelling"); ours draws them (`levelling_ring.rs`) with our own star sprite, height and twinkle,
+  and they go with the levelling (the original's last small sparkles live on up to 6 turns).
 - The intro flyby can start before the build ends (level 7: flyby from turn 12, last stone up at 68), orbiting
   the site while it builds; ours locks input during the build (`sites::site_build_active`) and runs the flyby
   separately - check the two don't fight over the camera.
