@@ -276,18 +276,24 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   views are indexed by unit position and rebuilt whenever a unit leaves the map: key them by unit id once there
   are many units.
 - [x] Wildmen idle loop implemented (`game_core::wildman`, units.md "From the levels"): state 1 → 8 → (5 "eating"
-  at a tree within `TREE_SEARCH_RADIUS_CELLS` (18), or 6/16 "drinking" at a shore cell within
+  at a tree within `TREE_SEARCH_RADIUS_CELLS` (12), or 6/16 "drinking" at a shore cell within
   `SHORE_SEARCH_RADIUS_CELLS` (12) if none found) → 8 → ..., `Action::Grazing`, anims 2/4 wired
   (`Pose::Eat`/`Pose::Drink`, original-asset only, CC0 falls back to idle). No plant scenery (types 7/8) is
   modelled in this engine at all, so only trees are searched - a narrower destination set than the original's own,
   `[ours]`; "shore" substitutes `wildman::is_shore_cell`'s own neighbour-based approximation for the original's
   untranslated coastal-shape table, also `[ours]`. `wildman::SEEK_EVERY` (how often it looks) and `GRAZE_TICKS`
-  (how long it lingers) are both guesses: the trace gives neither a number. Drowning at the shore needs no code
+  (how long it drinks) are both guesses. The meal (50-99 turns), the rest before the next tree search (128-252
+  turns from arriving) and the 12-cell radius follow pop3-rev-analysis.md "Eating at a tree" (one tick is one
+  turn), as do giving up the walk (128 turns, or the tree gone) and the meal (the tree gone). Left: whether the
+  shore search runs during the rest (ours: no) and the shore's own cooldown `+0x7C` (rerolled by 0x4D4870 on
+  arriving, its numbers untraced - **question for a spec session**); state 6's walk timer and state 16's
+  drinking length (`GRAZE_TICKS` stands in); state 34 ("noticing" a person, a head or a vehicle nearby).
+  Drowning at the shore needs no code
   of its own, confirmed to fall out of the generic per-turn check already. Still open, unrelated to the loop
   itself: the literal VSTART id each state resolves to was already known and is now wired (eat=2, drink=4); a
   wildman's death spirit-rise variant (see the death/spirit item below); whether an explicit attack order is
   honoured (see the wildman-attack item above, now resolved as a guess).
-- [ ] When the shaman reincarnates at her site, the wildmen within range of it are converted into braves of her tribe for free, each with a conversion animation. Done at level start without animation (`ReincarnationSite::welcomes`). The original (pop3-rev-analysis.md "Levelling", measured on level 7): it is the site's levelling, not the shaman's arrival, that converts them - any wildman inside the growing disc (160 world units a turn, up to 5 cells; each cell tested at its corner) becomes a new brave of the site's tribe the turn the disc reaches it, with a conversion flash; on level 7 the 6 wildmen 1-1.5 cells out convert 3 to 7 turns into the 21-turn levelling. So it happens every time the levelling runs (each build/rebuild), not just at level start.
+- [x] Wildmen around a level's site become braves of its tribe as the build ritual's levelling disc reaches their cell, every time it runs (`GameMap::convert_in_levelling`, pop3-rev-analysis.md "Levelling", units.md "From the levels"). Left: the conversion flash (7/0x3A, 8 turns); the new person's own id (ours keeps the wildman's).
 - [ ] Selection of buildings (without the people inside), and of units inside them (`selection::selectable`). Vehicles: a click with nothing selected selects the people aboard (vehicles.md).
 - [ ] Walking trails: footprints / worn paths left on the ground where units walk (fading over time).
 - [ ] Statuses (`Unit::statuses`: Magical Shield, Bloodlust, Invisibility and Hypnotism now cast for real,
@@ -603,6 +609,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   smoke cloud.
 - [ ] Swamp (`swamp`): its kill and overlap-claiming (ours: the most recently cast one on a contested cell) and the 30-per-tribe, oldest-goes cap (`swamp::over_cap`) are done; still missing is ending once most of its cells are unsuitable (what "unsuitable" means is not traced) (pop3-rev-analysis.md "Per spell" 11), and any world or aerial-map mark (no sprite, hfx 81; pop3-rev-analysis.md "Swamp: drawing, and the reedy-grass / mist ground dressing") — client only.
 - [ ] Bug, client only, found wiring up `lava::LavaView`: `just shot`/`HEADLESS=1 SCREENSHOT=...` with a dev var that instantly runs many ticks at once (e.g. `VOLCANO_TICKS=139` or more) can leave the terrain's own ground mesh and texture (`world.rs`'s `rebuild_terrain`) frozen on its pre-cast, flat state forever, while anything reading `CurrentMap` live (confirmed with `LavaView`'s own draped mesh) correctly shows the real, risen terrain — so the two visibly disagree (a textured lava patch floating over flat "ocean"). Confirmed: the simulation's own `GameMap.terrain` is correct and stable the whole time (direct `GameMap`-only test, no client); `just video` from a live-ticking start does not show it (its terrain updates correctly as Volcano rises, `target/video.mp4` frames checked). Only reproduced via the instant bulk `map.run(N)` dev-var path with a static `FOCUS`; happens consistently right around `volcano::SHAPING_TURNS` regardless of `VOLCANO_TICKS`'s exact value, survives disabling Volcano's lava/fireball spawn there (so it's not those effects specifically), and persists at `SHOT_FRAME` up to 200. Likely in `rebuild_terrain`'s dirty-tracking (`TerrainDirty`/`TerrainPatches`, `TerrainPatches` itself is otherwise never written anywhere) or in how `dev.rs`'s per-var instant catch-up interacts with the normal per-frame `SimClock` catch-up, not yet root-caused.
+- [ ] Convert (`game_core::convert`) to the original (pop3-rev-analysis.md "Convert wild", measured on level 17): life 18 turns (22 for a computer-controlled caster), reset to 18 at every conversion instead of our fixed 18 ticks, so it keeps converting while wildmen remain; the reach is the 5 × 5 whole cells around the cast cell (7 × 7 for a computer caster), nearest wildman first, not our 2-cell circle; a wildman on a coast/sea cell there is not converted but walks inland and stands still (up to 64 turns) to be converted on a later try; a tribe in "give up and sulk" ends the effect at once without converting; the first try comes on the effect's own 8-turn phase (2 turns after the cast in both measured casts), ours on tick 8. Client: draw the ring - 4 sparkles a turn at random angles on a circle of radius 2.5 cells around the cast cell's centre, each twinkling in place 4-7 turns (about 22 alive at once), following the ground, the reincarnation levelling's gold sparkle (`sparkles.rs`-style twinkle); the cast sound plays once at the start.
 
 ### Buildings ([buildings.md](docs/specs/buildings.md))
 - [ ] Spacing between buildings (buildings.md "Blueprint", `placement::walls_touch`): a new building's walls may not
@@ -725,7 +732,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Towers (drum tower): hold one unit (going in is done, `game_core::enter`), which gets a longer range from there: firewarriors throw farther, the shaman casts spells farther, a preacher converts enemies around the tower. No other tower effect.
 - [ ] Training huts (huts-and-training.md "Done"): the queue's ripple (2 turns per rank) and those already of the building's kind letting the others pass, five trained together (the exe's count; ours holds one - a [player] note, reaffirmed, says it's always one at a time in play, so this needs a live check before five-at-once is implemented), queued orders carried over, damage cancelling the queue and sending the trainee out.
 - [ ] Training as in the original, what is left (pop3-rev-analysis.md "Training buildings"): the computer players' cost (`CP_` 1000) once tribes have a controller; the trainee's queued orders given to the new unit. The training time is already answered, no live measurement needed: the original has no fixed duration at all, just the mana cost filled at `cost / 32` per 16-turn income tick (same section) - 256-512 turns (21-43 s) at best, scaling with cost like everything else in the mana-income system.
-- [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, wildmen, trees and swamps; pillars rising out of the ground, deleted and moved; the 32 sparkles - a ring 320 world units out that turns 16° and widens 160 a turn to 4 cells, each sparkle dropping a 6-turn small sparkle every turn, alive for the levelling's 20 turns (pop3-rev-analysis.md "Levelling"). Pillar rise (pop3-rev-analysis.md "Pillars"): from 256 below to exactly ground level, +16 a turn for 16 turns (1.33 s) - ours guesses `RISE_DEPTH` 1.2 cells over `RISE_SECS` 2 s (game-client `sites.rs`). The intro flyby can overlap the build (level 7: flyby from turn 12, orbiting the site; last stone up at turn 68): check our input lock during the build (`sites::site_build_active`) and the flyby don't fight over the camera.
+- [ ] Reincarnation sites from pop3-rev-analysis.md "Reincarnation sites": the ground levelled to the site height over a 5-cell disc in about 21 turns (ours: radius 3, blend 4) with its effects on enemies, trees and swamps (wildmen done: `GameMap::convert_in_levelling`, its conversion flash not drawn); pillars rising out of the ground, deleted and moved; the 32 sparkles - a ring 320 world units out that turns 16° and widens 160 a turn to 4 cells, each sparkle dropping a 6-turn small sparkle every turn, alive for the levelling's 20 turns (pop3-rev-analysis.md "Levelling"). Pillar rise (pop3-rev-analysis.md "Pillars"): from 256 below to exactly ground level, +16 a turn for 16 turns (1.33 s) - ours guesses `RISE_DEPTH` 1.2 cells over `RISE_SECS` 2 s (game-client `sites.rs`). The intro flyby can overlap the build (level 7: flyby from turn 12, orbiting the site; last stone up at turn 68): check our input lock during the build (`sites::site_build_active`) and the flyby don't fight over the camera.
 - [x] The site's build/rebuild is not instant, and is driven by the shaman, not level load directly
   (pop3-rev-analysis.md "Build/rebuild ritual"): she walks to the anchor, settles 12 turns, triggers the ~21-turn
   ground levelling above, then fires one projectile per pillar slot a turn apart (slot order 7..0), each pillar
@@ -2069,22 +2076,37 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   variety loops with a live volume, one sound at a time per owner, drum loops chained under the music by the
   fight intensity, fade-outs, the pause/menu rules, the original's listener, 48-cell cut-off, `1 - d²/D²`
   falloff and equal-power balance, 10 effects at most, 250 ms between repeats, `--mute`, `--debug-audio`. The
-  library is empty: nothing plays yet. The low-quality bank is left out on purpose.
-- [ ] Fill the `SoundLibrary`: music (`PopDrones22`, Layer II through symphonia) and the drum banks are loaded
-  (`audio_load.rs`). Left: `Soundd2` entries (`Entry::wav`) through the sound id -> entry-range table (volume,
-  priority, while-paused flag), the `POPfightnew.SDT` alternative ranges, CC0 sounds for `--no-original`.
-  **Question for a spec session**: the per-id record table itself (sound.md "Sound ids") is not in docs/ - its
-  229 rows (first entry, variant count, fight-bank range, priority, volume, while-paused) are needed before any
-  SFX can be wired.
-- [ ] Play SFX from game events: spells, chopping, building, ambience layers, the battle crowd, casting shouts
-  (`Sv_*`/`En_Sv_*`), deaths; selection/order voices, flyby start/cancel and the menu click are wired
-  (`audio_cues.rs`, families by entry name - a guess until the sound id table is documented, see the item above);
-  the fight flag into `SetIntensity` (done as a guess: scaled by the player's people engaged, calm silent -
-  sound.md "Playback in the client"; replace by the original's flag, or keep the scaling and tune `MELEE_ARMY`,
-  once heard in play). Work sounds on their animation frame, the clips' own loop points, reverb,
-  drum loops chained without a frame's gap.
-  Triggers are now mapped (sound.md "How the original plays them"): play by sound id through the id -> entry-range
-  table, not by bank index; looping sounds need explicit stops; music = drone track + intensity-driven drum loops.
+  library is filled from the install (next item). The low-quality bank is left out on purpose.
+- [ ] Fill the `SoundLibrary`: music (`PopDrones22`, Layer II through symphonia), the drum banks and `Soundd2`
+  through the sound id table (sound.md "Sound id table", `audio_ids.rs`: entry ranges, volume, priority) are
+  loaded. Left: the fight bank `POPfightnew.SDT` (punches, swords, yells, hit grunts: the table gives their names
+  but not their entry indices in that bank - **question for a spec session**), CC0 sounds for `--no-original`.
+- [ ] Play SFX from game events: people (deaths, drowning, screams, landing grunts, cast shouts, burning,
+  conversion, invisibility), work, spell effects, shots, vehicles, burning and finished buildings, the battle
+  crowd and the shield hum are wired by the id table's triggers (`audio_world.rs`), with the selection/order voices,
+  flyby, menu click and site stones (`audio_cues.rs`); sound.md "Playback in the client" lists them. Guesses, tagged
+  in code and sound.md:
+  - work sounds every 8 turns of the work (`WORK_EVERY`) rather than on their
+    animation's sync frame (the client sees no animation frame: give the sim or the views the frame, then play on
+    it, the sync frame dropped if the animation changes first);
+  - the cast shout as the cast starts, not at the spell's launch;
+  - the shield hum within 48 cells of the listener for "drawn near the camera";
+  - the lava loop runs to the effect's end (the original stops it once the flow stops growing);
+  - the ambience bed's "near the camera" as 12 cells around the look-at point, its shore weight as a share, and
+    the random one-shots' per-frame odds counted at 30 frames a second;
+  - **conflict for a spec session**: `0xCF` is a person's low-health loop in pop3-rev-analysis.md "Statuses" but
+    `tweets` on a contented building in the id table; nothing plays it until settled.
+  Not wired yet (no client-side state for them): a hut's birth (`0x28`, local player), a whirlwind's wood crack and
+  branch snap (`0x12`, `0xD4`), the building creak (`0x34`), Firestorm's falling fireballs (`0xB3`) and the
+  volcano's rocks (`0xBC`), a fireball into the sea (`0x55`), the sermon voices (`0x33`, `0xBD`), the Angel of
+  Death's roar, wing flaps and spawn voice (`0xDC`, `0xDB`, `0xD8`), the reincarnation site's prep and sinking
+  pillars (`0x9E`, `0xC5`), the guard post loop (`0xC0`), the fight alarm (`0x23`), the battle cries and melee
+  blows (fight bank), the soul swirls (`0xD0`, `0xD1`), the shaman's return (`0x6B`), discoveries, the panel's
+  clicks (placement, rotate, wrong, spell/building buttons, page turn, bookmarks, message icons), `noentry`.
+  The ambience bed, seagulls and wildlife are in (`audio_ambience.rs`). Left besides: the fight flag into `SetIntensity` (done as a guess: scaled by the player's people
+  engaged, calm silent - sound.md "Playback in the client"; replace by the original's flag, or keep the scaling and
+  tune `MELEE_ARMY`, once heard in play), the clips' own loop points, reverb, drum loops chained without a frame's
+  gap.
 
 ### Art ([assets.md](docs/specs/assets.md))
 - [x] Audit the original-data-free path and missing assets across buildings, units, scenery, VFX, UI and audio ([inventory](docs/specs/assets.md)).

@@ -109,7 +109,8 @@ so a live measurement may run on it with the addresses translated.
   last height edit rather than read live, shared with ordinary terrain-shaping and level load, not lava-only.
   See "Volcano lava flow".
 - **Wildmen seek a tree first, the shore otherwise, and never respawn** [exe]: unable to take orders, they search
-  for a nearby tree/plant to idle beside (state 5, "eating") and, failing that, deliberately walk to a shore cell
+  for a nearby tree/plant, walk to it (state 5) and eat beside it for 50-99 turns with the eat sound back to back
+  (state 15, measured on level 17) and, failing that, deliberately walk to a shore cell
   to idle there instead (states 6/16, "drinking") - confirmed from the exe's own scenery-type and coastal-shape
   tables, not a random destination. No hunger/thirst/age stat exists even so, and the only way to create a
   wildman is a one-shot level-placement routine, never a per-turn spawn. They are also immune to ordinary units'
@@ -171,6 +172,10 @@ so a live measurement may run on it with the addresses translated.
   (turns 14-35) converts the starting wildmen as it reaches them, under a widening spiral of 32 sparkles; the
   stones rise 16 turns each from 256 below to ground level (last one up at turn 68), and the level's flyby may
   already be orbiting the site meanwhile. See "Reincarnation sites".
+- **Convert lasts as long as it keeps converting** [exe, measured on level 17]: every 8 turns the nearest
+  wildman in a 5 × 5 cell square (7 × 7 for the computer) becomes a brave and the effect's life goes back to 18
+  turns; it never draws wildmen in. Its ring is 4 random sparkles a turn on a circle of radius 2.5 cells, each
+  twinkling 4-7 turns. See "Convert wild".
 
 ## Turns and timing [exe]
 ```text
@@ -1227,7 +1232,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
 | 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); a random number of fireballs (about 31 small and 9 big on average) thrown ballistically 3-10 cells out, landing in simple blasts ("Volcano fireballs") and 26 decorative rocks ("Volcano rocks"). |
-| 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman within 2 cells becomes a brave of the caster (if the tribe is under 200); ends 18 turns after the last conversion. |
+| 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman on an all-land cell in the 5 × 5 cells around the cast cell (7 × 7 for a computer caster) becomes a brave of the caster (if the tribe is under 200); wildmen on coast cells there step inland instead. Life 18 turns (22 computer), reset to 18 by each conversion. A scatter of gold sparkles on a 2.5-cell-radius circle, 4 a turn, 4-7 turns each. See "Convert wild". |
 | 18 | Armageddon (hidden) | Clears the map, turns every building into one person, gathers every tribe on an arena around the target and makes them fight; the weakest shaman is struck by blast or lightning at intervals; anyone more than 9 cells away dies. |
 | 19 | Shield (60 000, 4096, 4) | The `SHIELD_NUM_PEOPLE` (file 6) nearest own followers (not shaman, wildmen, angels, ghosts) for 120 s: immune to blast and whirlwind, other damage ignored too, except melee; deflects burn, blast, lightning, whirlwind and insect shots. |
 | 20 | Bloodlust (hidden) | 6 nearest own followers for `BLOODLUST_COUNT_X8` × 8 turns (file 120 s): melee and firewarrior damage × `BLOODLUST_DAMAGE_X` (3), damage taken >> `BLOODLUST_HEALTH_X` (3, i.e. / 8), firewarrior reload >> `BLOODLUST_SW_BLAST_X`. |
@@ -1235,6 +1240,59 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 
 Friendly fire: lightning, whirlwind, swamp, volcano and lava hurt the caster's own people; blast, firestorm and
 insects do not damage allies. Lightning and swamp kill regardless of health.
+
+### Convert wild [exe, measured]
+One effect (7/0x49, effect state 60, `pop3-rev/docs/effect_states.csv`) at the target point, with its own life
+counter `+0x6C`. It never moves; conversions and sparkles are both centred on the cast cell, not the exact point.
+
+```text
+init (0x5122E0):  life = 22 if the caster's tribe is computer-controlled (tribe+0xC1F == 1), else 18
+                  sound 0xB4 ("Conv_bg") once
+every turn (0x512350):
+  if life > 0: life -= 1
+  if tribe population (tribe+0x91D) < 200 and (effect's own turn counter & 7) == 0:     # every 8 turns
+      r = 3 if computer-controlled else 2
+      scan the (2r+1) x (2r+1) whole cells around the cast cell (5 x 5 human, 7 x 7 computer):
+        every wildman (person type 1) there:
+          its cell is not all land (coast shape != 0, i.e. shore or sea):
+              not a candidate; forced into person state 8 sub-state 3 ("step inland and wait", below)
+          else: candidate, keep the nearest to the effect (0x450450)
+      nearest candidate found:
+          tribe in "give up and sulk" (tribe+0x941 bit 0x40): life = 0           # ends, no conversion
+          else: life = 18; replace the wildman by a brave of the caster's tribe (0x4D7FD0)
+  if life > 0:
+      4 sparkles (7/0x3C), each at a random angle (rand & 2047), 1280 from the centre of the cast cell,
+      snapped to the ground there then lowered by 24, life 4 + (rand & 3) = 4..7 turns
+  else: delete the effect
+```
+
+- Duration: 18 turns (1.5 s) for a human caster, 22 (1.8 s) for a computer one, but every conversion resets it to
+  18, so it lasts as long as there is a wildman to convert every 8 turns, then 18 turns more. With nobody in reach
+  it gets 2 or 3 tries. The population cap only skips the try (life still runs down).
+- Reach: a square, not a circle: 2 whole cells around the cast cell for a human (edges 2.5 cells out on each
+  axis, about 3.5 cells at the corners), 3 for the computer. Measured: conversions at (−2.91, +0.11),
+  (+2.78, +2.02) and (+2.93, −2.20) cells from a computer's cast.
+- The new brave is a new unit (new id) in person state 10 for one turn, then idle (state 19), with the conversion
+  flash and chime of 0x4D7FD0 (as in "Levelling"). The wildman's current activity does not matter: one eating at
+  a tree (person state 15) was converted.
+- Wildmen are not attracted: none walks towards the spell (measured). The only movement it causes is on wildmen
+  standing on a coast or sea cell inside the square: they are not converted that try but put into person state 8
+  sub-state 3 (0x4D6523): for 64 turns, every 4 turns, while their cell is not all land they turn to the cell's
+  coast direction + 180° (0x465580, the shape's direction byte + 4, of 8) and walk; once on land they stop and
+  play the idle animation, their tree/shore wander timers held at 16, so they stand still to be converted on a
+  later try. Measured: a wildman found in 8/3 was converted 7 turns later on the same spot.
+
+Look: the "ring" is a scatter of short-lived sparkles on one circle of radius 1280 (2.5 cells, diameter 5 cells)
+around the cast cell's centre, 4 new ones a turn at random angles, about 22 alive at once (measured 21-24). They
+are the same 7/0x3C gold four-point twinkle as the levelling's (hfx 1288-1303, camera-facing billboard,
+animation 0x508, one frame per drawn frame, see "Levelling"), but standalone: they do not move, orbit or drop
+small sparkles; each twinkles in place for 4-7 turns and vanishes. They follow the ground (24 below the terrain
+at their own point; −24 over the sea). For a human caster the circle is the one inscribed in the 5 × 5 cell
+square that is actually scanned; the computer's 7 × 7 square reaches beyond it.
+
+Measured on level 17 (three AI casts, `pop3-rev/mesurements/convert_level17.log`, `scripts/watch_convert.py`):
+life 22 at birth, conversions on turns where the effect's counter is a multiple of 8 (life back to 18 each time),
+deletion exactly 18 turns after the last one; every sparkle born 1279-1281 from the cell centre, living 4-7 turns.
 
 ### Volcano rocks [exe]
 Purely decorative: the volcano's per-turn function (0x50E060) makes one scenery 13 ("rock", `create_unit(5, 13)`
@@ -3313,11 +3371,11 @@ table entry here: it is picked by type inside state 19.
 Wildmen (type 1) alone reach **state 8** (0x4D60D0) from state 1. Every turn it runs its own LCG (seed 0x89BC72,
 the same `x*0x9E3D+0x24DF; ror 13` shape as the shared 0x89D178 generator) for a ~1-in-256 chance of an ambient
 sound; every 4 turns it ticks two sub-timers (`+0x7B`/`+0x7C`); every 16 turns, once either hits 0, it looks for
-a nearby "reference unit" (0x4D48E0) and on success enters **state 5** (0x4D6970, already traced as "idle near a
-reference unit"), which on its own timer picks a per-type animation/sound id from the same 0x5A7064 table (bytes
-3+, the odds table already named "0x5A7067") scaled by its own RNG roll - the confirmed idle-fidget-variant
-picker, on a 16-turn (1.33 s) re-roll rhythm. On failure to find a reference unit it instead tries a second
-search (0x4D4A00) and may enter state 6 - now fully traced, see "Wildmen".
+a nearby tree or plant (0x4D48E0, only while `+0x7B` is 0) and on success enters **state 5** (0x4D6970). For a
+wildman, state 5 is the walk to the tree and state 15 the eating; the 0x5A7067 byte is not an animation picker
+but the tree-search cooldown state 5 re-arms on arrival - corrected, see "Wildmen" "Eating at a tree". On failure
+to find one it instead tries a second search (0x4D4A00, only while `+0x7C` is 0) and may enter state 6 - now
+fully traced, see "Wildmen".
 
 Whether an ordinary follower (brave, warrior, ...) ever reaches state 5 on its own was **not confirmed**: no
 write of state 5 was found inside `order_execute` or its kind-3/kind-6 handlers, only inside the preach-order
@@ -3373,7 +3431,9 @@ touches the command-group machinery. Wildmen are also always tribe `0xFF` (tribe
 resource target"** - re-reading both search functions in full, and the scenery-type flags table they key off,
 directly from the exe shows both searches are deliberately targeted, not random:
 
-From state 8, it first calls **0x4D48E0** - a ring search, radius 18 cells (per-type table 0x5A7069), over
+From state 8, it first calls **0x4D48E0** - a ring search, radius 12 (per-type table 0x5A7069; the wildman row is
+the byte 0x5A709B = 12, the same byte the shore search below reads, so both searches share one radius - an
+earlier draft said 18, which is not what the exe holds), over
 nearby cells' unit lists, matching the first **scenery (class 5) object whose type has bit 0 set** in a per-type
 flags table at **0x5A79C4** (24 bytes/record, read directly from the exe):
 
@@ -3385,10 +3445,10 @@ flags table at **0x5A79C4** (24 bytes/record, read directly from the exe):
 | 9 head, 0xA fire, 0xB wood pile, 0xC pillar, 0xD rock, 0xE portal, 0xF island, 0x10 bridge, 0x12/0x13 scenery | clear |
 
 Only the 6 tree variants and 2 plant types are flagged; nothing else is, and a class-1 person is never matched by
-this loop. On success both the wildman and the found tree/plant transition to **state 5** (0x4D6970,
-"Idle-fidget animations") - **this is the "eating" stop**, deliberately beside a tree or plant.
+this loop. On success the wildman alone (the tree's own state is untouched) stores the tree's id in `+0x72` and
+enters **state 5**, the walk to the tree, then **state 15**, the eating beside it - see "Eating at a tree" below.
 
-Only if no tree/plant is found within 18 cells does state 8 fall back to **0x4D4A00** - a second, separate ring
+Only if no tree/plant is found within 12 cells does state 8 fall back to **0x4D4A00** - a second, separate ring
 search, fixed radius 12 cells (scalar byte 0x5A709B), that **rejects** any candidate cell whose coastal-shape
 class (table 0x5AA328, 14 bytes/record - the SAME table `is_land_at`/0x44F980 uses for a cell's coast shape,
 "Parking and the shore") lacks bits 0x3C (straight-coast/corner/bay/opposite-corners), rejects the
@@ -3423,11 +3483,37 @@ entries 3/4, object ids 32/24) by comparing `+0x33` to `ds:0x5A6864`; no terrain
 specific toggle. State 16 also rolls its own ~50% per-turn ambient-sound chance (the same 0x89BC72 LCG seed as
 state 8); on timeout, the same per-type fallback closes the loop back to **state 8**.
 
-The full cycle observed in play is **1 → 8 → (5 or 6) → 16 → 8 → ...**: an idle tick that checks for a tree/plant
-first (state 5, beside it) and only wanders to the shore (state 6 → 16) when none is near. **Confirmed in play
-[observed]: it is always fruit-eating at state 5 (the tree/plant stop) and always drinking at state 16 (the
+### Eating at a tree: walk (state 5), then eat (state 15) [exe, measured]
+A person state handler returns the next state (0 = stay). The tree stop is two states, not one:
+```text
+state 5 (walk to the tree), entry: +0x72 = the tree, +0x70 = 128
+  every turn: 0x4D66E0 "notice something nearby" (as in state 6) may take over first
+  tree gone → per-type default (wildman: state 8)
+  +0x70 -= 1; reaches 0 → per-type default (gave up walking after 128 turns, 10.7 s)
+  every 8th turn: walk toward the tree
+  within 120 units of the tree on both axes →
+    tree-search cooldown +0x7B = 32 + rand(32)   (from the per-type byte 0x5A7067 = 64, halved; state 8 ticks it
+                                                  down every 4 turns, so 128-252 turns before the next tree search)
+    → state 15
+state 15 (eat beside the tree), entry: +0x70 = 50 + rand(50), animation counter reset, faces the tree (0x4A79F0)
+  every turn: no sound attached to the wildman → play 0x03 (eat) or 0xBE (wildman eat), 50/50
+  tree gone → look in the wildman's own cell for a person of another type with +0x78 set:
+    found → state 34 ("noticing") with it; none → the timer ends now
+  +0x70 -= 1; reaches 0 (or unit flags 0x2004) → per-type default (wildman: state 8)
+```
+So a meal lasts 50-99 turns (4.2-8.3 s), with the eat sound restarted each time the previous one ends: one sound
+at a time, back to back, not every N turns.
+
+**Measured live, level 17, 2500 turns** (`pop3-rev/scripts/watch_wildman_states.py`): 285 state 5 → 15
+transitions, every one still pointing at its tree (scenery types 1-3); state 15 then went to 8 (275) or to 34
+(15, noticed something). Time in state 15: median 73 turns, max 99; in state 5: median 56, max 128. No person
+other than a wildman was seen in state 15.
+
+The full cycle observed in play is **1 → 8 → (5 → 15, or 6 → 16) → 8 → ...**: an idle tick that checks for a
+tree/plant first and only wanders to the shore when none is near. **Confirmed in play
+[observed]: it is always fruit-eating at the tree/plant stop and always drinking at state 16 (the
 shore stop), never the other way round or ambiguous** - the animation is not a separate choice at all, it falls
-out of which search succeeded: state 5 only ever triggers beside a tree/plant, so whatever it plays IS the eat
+out of which search succeeded: state 15 only ever follows a walk to a tree/plant, so whatever it plays IS the eat
 animation; state 16 only ever triggers at the shore, so whatever it plays IS the drink animation. What is still
 not pinned to a specific line of code is the literal VSTART id each state resolves to for wildmen (already known
 from sprite inspection: eat-fruit = 2, drink = 4) - `0x4D4040`'s own 3/4 toggle looks too generic/cosmetic to be
@@ -3436,7 +3522,7 @@ the main VSTART/VFRA system (the per-type `[action × 9 + type]` table at 0x5A6D
 `+0x33` "attached object" system - open, not confirmed either way.
 
 ### No hunger or thirst stat, but drowning at the shore is real and common
-No field read by any wildman-reachable state (1, 5, 6, 8, 16) is ever compared against a "starved"/"aged-out"
+No field read by any wildman-reachable state (1, 5, 6, 8, 15, 16) is ever compared against a "starved"/"aged-out"
 threshold, and none of them touch the health field `+0x6E` at all - **confirmed absent, not merely untraced**:
 visiting a tree or the shore never consumes anything, it only picks where an idle animation plays.
 
@@ -6211,6 +6297,14 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 - trees.md "Growth": the original regrows 2 wood per 16 turns, one piece in 800 turns (67 s); ours regrow one
   piece every 800 ticks, the same time, in one step.
 - Spell durations in turns convert the same way, e.g. `SHIELD_COUNT_X8` 180 is 1440 turns, 120 s.
+- spells.md Convert (`game_core::convert`), against "Convert wild": ours lives a fixed 18 ticks; the original's
+  life is 18 turns (22 for a computer caster) and goes back to 18 at every conversion, so it keeps going while
+  there is someone to convert. Ours takes the nearest wildman within a 2-cell circle of the cast point; the
+  original scans the 5 × 5 whole cells around the cast cell (7 × 7 for a computer caster), skips wildmen on
+  coast/sea cells and sends them inland to wait instead, and ends at once without converting for a tribe in "give
+  up and sulk". Ours tries first on tick 8; the original on its own 8-turn phase (2 turns after the cast in both
+  measured casts). Ours draws nothing; the original draws 4 sparkles a turn on a circle of radius 1280 (2.5
+  cells) around the cast cell's centre, 4-7 turns each, the levelling's sparkle sprite.
 - Specialists cannot carry wood with the file's values, as in our braves-only rule.
 - huts-and-training.md rule 5 (breeding): our `occupants + 1` per update against `2 × SPROG_TIME × band` gives the
   same time as the original if one update is one turn (original: `2 × (inside + 1)` every 4 turns against
@@ -6254,10 +6348,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   stone also rising out of the ground on arrival, from 256 below to exactly ground level, +16 a turn for 16 turns
   (1.33 s; ours: `RISE_DEPTH` 1.2 cells, `RISE_SECS` 2 s, guessed) - see "Build/rebuild ritual" above. The same
   sequence runs again on a relocation (new shaman, new last-death anchor), not just a one-time level-load step.
-- Wildmen at the site (`ReincarnationSite::welcomes`, ours: converted at level start, all at once, no
-  animation, any wildman within the ring range): the original converts them during the levelling, as the
-  growing disc reaches their cell, each with a conversion flash - on level 7, 3 to 7 turns into it. Any
-  wildman inside the 5-cell disc qualifies, not just the ring of cells (see "Levelling").
+- Wildmen at the site: ours now converts them during the levelling as its disc reaches their cell
+  (`GameMap::convert_in_levelling`, see "Levelling"), any wildman inside the 5-cell disc; no conversion flash
+  drawn, and the brave keeps the wildman's id. Sites built from the start (no ritual) still welcome the ring of
+  cells around them at load (`ReincarnationSite::welcomes`).
 - The levelling's sparkles: a spiral of 32 sparkles widening 160 a turn to 4 cells, each leaving 6-turn small
   sparkles (see "Levelling"); ours draws none.
 - The intro flyby can start before the build ends (level 7: flyby from turn 12, last stone up at 68), orbiting
@@ -6388,12 +6482,16 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   around the spot it stood on when it went idle (not the remembered `+0x4F`), and ignores the `+0x82` gate on
   the warrior/firewarrior pose. The spy's juggling trigger is not traced: ours rolls it like the
   others, one whole loop.
-- Wildmen (no AI in our code today; "Wildmen"): the original drives them through a confirmed 1 → 8 → (5 or 6) →
-  16 → 8 loop - first search nearby (18 cells) for a tree or plant and idle beside it if found (state 5); only
+- Wildmen (`game_core::wildman`; "Wildmen"): the original drives them through a confirmed 1 → 8 → (5 → 15, or
+  6 → 16) → 8 loop - first search nearby (12 cells) for a tree or plant, walk to it and eat beside it (5 → 15); only
   if none is near, walk to a nearby shore cell instead (states 6/16, explicitly rejecting inland and open-sea
   cells) and idle there with ambient sound. Both destinations are deliberate, keyed off the exe's own
   scenery-type and coastal-shape tables - not a random point. No hunger/thirst/age stat exists even so; nothing
   is actually consumed at either stop, it only decides where the idle animation plays.
+  Eating at a tree ("Eating at a tree"): ours follows the 12-cell radius, the 50-99 turn meal, the 128-252 turn
+  rest before the next tree search and the eat sound back to back (one tick is one turn; an earlier note here
+  gave "42-83 ticks", which was wrong), giving up the walk after 128 turns or once the tree is gone, and the meal
+  once the tree is gone (without the state 34 look first).
   `attack.rs`'s `wildmen_never_fight_and_nobody_attacks_its_own` test makes wildmen entirely unattackable; the
   original only confirms the *automatic* proximity scan skips them (tribe 0xFF is never treated as an enemy) -
   whether an explicit player attack order also respects that filter is still open, so our blanket rule may be
@@ -6472,6 +6570,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   player's tribe ignores undiscovered trees; no effect on spotting, targeting or combat.
 
 ## Open questions
+- Convert wild ("Convert wild"): the phase of the effect's own 8-turn counter at birth (measured: first try 2
+  turns after the cast, twice); `0x450450`'s exact metric (nearest wildman); what `0x4D6660` does when a coast
+  wildman in person state 8/3 "walks" (assumed: start moving along its new heading, not confirmed live); the
+  "3/0" answers of `0x518200` (bitmap `0x96AA74`) do not change Convert, but their meaning is open.
 - Reincarnation site ("Build/rebuild ritual", "Levelling"): what reads a rising pillar's `+0x6C` (256 → 0 over 8
   turns); what turns on the "remove the player's shaman" mode (level option byte 0x89B7A3 bit 0x2, only ever
   filled by block copies).
@@ -6709,7 +6811,10 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x51A2A0 | a person's attack order: reach, then join a fight or start a pre-fight |
 | 0x51C3C0 | attack target eligibility by attacker type; a preacher/non-preacher gate on order kind 0x1C specifically - a dead end for "Preacher conversion", see that section |
 | 0x51CE50 | preacher/shaman-only nearest-person scan, called from 0x51C3C0 for a preacher attacker |
-| 0x4D6970 | person state 5 per-turn handler: idle near a reference unit (`+0x72`), not preach-specific |
+| 0x4D6970 | person state 5 per-turn handler: walk to the reference unit (`+0x72`, a wildman's tree); within 120 units → state 15 |
+| 0x4D2A5D | person state 5 entry (init switch case 5): `+0x72` = 0, `+0x70` = 128 |
+| 0x4D6BE0 | person state 15 per-turn handler: eat beside the tree, eat sound 0x03/0xBE whenever none is attached |
+| 0x4D2B93 | person state 15 entry (init switch case 0xF): `+0x70` = 50 + rand(50), faces the reference unit |
 | 0x51E150 | "start_pre_fight(attacker, target, mode)" |
 | 0x518630 | "pre_fight_turn": approach, kick, knockback, then the fight |
 | 0x51DE60 | "start_fight(a, b)" from a pre-fight |
@@ -6847,7 +6952,11 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
 | 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn (disc, conversions, sparkle spiral, "Levelling") |
 | 0x4A7EB0 | reincarnation pillar rise/sink: 16 turns of +16 from ground − 256 to ground; sink 32 turns of −8 then delete |
-| 0x4D7FD0 | replace a unit by a new one of another tribe/type (used for the levelling's wildman → brave) |
+| 0x4D7FD0 | replace a unit by a new one of another tribe/type (the levelling's and Convert's wildman → brave) |
+| 0x5122E0, 0x512350 | Convert wild (7/0x49, effect state 60): init (life 18/22, sound 0xB4), per turn (8-turn tries, sparkles, "Convert wild") |
+| 0x518200 | cell kind at a position: 1 building, 2 cell flag 0x4, 4 not all land (coast shape ≠ 0), else 3/0 by a bitmap at 0x96AA74 |
+| 0x465580 | heading away from a coast cell's water: ((shape direction + 4) & 7) × 256 |
+| 0x4D6523 | person state 8 sub-state 3 (wildman): 64 turns, walk off a coast cell, then stand still |
 | 0x41C140, 0x41C520 | rarer, all-8-pillars-at-once site rebuild path (flag-gated, not the ordinary level-load path - see 0x419880/0x433A10 above), pillars from 0x5A9F10 |
 | 0x468E1C-0x4694F2 | in `draw_polygons`: health bar, low health, shield, bloodlust, hypnosis and selection markers |
 | 0x525450 | health bar of a person |
@@ -6860,7 +6969,7 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4D60D0 | person state 8 (wildmen only): picks a "reference unit", may enter state 5 (fidget) or 6 ("Idle behaviour") |
 | 0x4E32A0 | "settle and go idle": next state for a person with no group - type table +5 (17; 8 for wildmen), or 41 |
 | 0x4D73E0 | person state 19: standing loop (sub-state 5), shuffle (6/7), bored pose (10) every 32 turns ("Bored poses") |
-| 0x4D48E0 | wildman "find a nearby tree/plant" search (18 cells, scenery-type flags table 0x5A79C4) - state 5 |
+| 0x4D48E0 | wildman "find a nearby tree/plant" search (radius byte 12, scenery-type flags table 0x5A79C4) - state 5 |
 | 0x4D4A00 | wildman shore-destination search (12 cells, coastal-shape table 0x5AA328, rejects land/open sea) |
 | 0x4D342A, 0x4D6E40 | wildman states 6 (walk to the shore destination) and 16 (idle/ambient animation there) ("Wildmen") |
 | 0x4D66E0 | wildman state 6's "notice a nearby object/vehicle/enemy" check, binds into untraced state 0x22 |

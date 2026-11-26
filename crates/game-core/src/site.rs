@@ -8,7 +8,7 @@ use crate::event::WorldEvent;
 use crate::terrain::{DirtyRect, Heightmap};
 use crate::time::{Countdown, Tick, Ticks};
 use crate::tribes::TribeId;
-use crate::unit::{isqrt, torus_delta};
+use crate::unit::{isqrt, torus_delta, UnitId, UnitKind};
 use pop3_format::{Level, WORLD_UNITS_PER_CELL};
 
 /// Cells (around the site's own, either axis) whose wildmen join the tribe when its shaman appears.
@@ -151,6 +151,45 @@ impl ReincarnationSite {
     }
 }
 
+/// The levelling disc grows this many world units a turn, up to `LEVEL_MAX_RADIUS` (pop3-rev-analysis.md
+/// "Levelling" [exe, measured]).
+pub const LEVEL_GROWTH: u32 = 160;
+pub const LEVEL_MAX_RADIUS: u32 = 2560;
+
+/// The levelling disc's radius `done` turns in, world units.
+pub fn level_radius(done: Ticks) -> u32 {
+    (LEVEL_GROWTH * done.get()).min(LEVEL_MAX_RADIUS)
+}
+
+impl ReincarnationSite {
+    /// Whether the levelling disc of radius `r` (world units) reaches `cell`, tested at its corner as the
+    /// original ("Levelling"): the cells on the + side of the site are reached a little before the - side. A
+    /// round disc is ours (the trace says "within the radius").
+    pub fn levelling_reaches(&self, cell: (i32, i32), r: u32) -> bool {
+        let corner = |c: i32| (c * WORLD_UNITS_PER_CELL as i32) as u16;
+        let (dx, dz) = (torus_delta(self.x, corner(cell.0)) as i64, torus_delta(self.z, corner(cell.1)) as i64);
+        dx * dx + dz * dz <= (r as i64).pow(2)
+    }
+}
+
+impl crate::map::GameMap {
+    /// The levelling of `owner`'s site, `done` turns in: every wildman on a cell its disc reaches becomes a brave
+    /// of `owner` (pop3-rev-analysis.md "Levelling": "Wildmen into braves", the effect's flag 1, ours always set).
+    pub(crate) fn convert_in_levelling(&mut self, owner: TribeId, done: Ticks) {
+        let Some(site) = self.sites.iter().find(|s| s.owner == owner && s.enabled) else { return };
+        let r = level_radius(done);
+        let reached: Vec<UnitId> = self
+            .units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Wildman && u.is_alive() && u.inside.is_none() && site.levelling_reaches(u.cell(), r))
+            .map(|u| u.id)
+            .collect();
+        for unit in reached {
+            self.change_owner(unit, owner);
+        }
+    }
+}
+
 /// Build/rebuild ritual (pop3-rev-analysis.md "Build/rebuild ritual"): what an `animated`
 /// `ReincarnationSite`'s shaman is doing before she's free, carried on her own `Action::BuildingSite`.
 /// Walking to the anchor (state 0) isn't a state of its own here: she always spawns exactly on it (no site
@@ -279,6 +318,20 @@ pub fn generated_sites(terrain: &Heightmap) -> Vec<ReincarnationSite> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_levelling_disc_grows_160_a_turn_to_5_cells_and_reaches_the_plus_side_first() {
+        assert_eq!(level_radius(Ticks::new(1)), 160);
+        assert_eq!(level_radius(Ticks::new(3)), 480);
+        assert_eq!(level_radius(Ticks::new(21)), 2560);
+        let site = ReincarnationSite::at_cell(TribeId::Blue, (40, 40), 64);
+        let first = |cell| (1..=21).find(|&t| site.levelling_reaches(cell, level_radius(Ticks::new(t))));
+        assert_eq!(first((40, 40)), Some(3), "its own cell's corner is half a cell away on both axes: 362");
+        assert!(first((41, 40)) < first((39, 40)), "+ side first");
+        assert_eq!(first((47, 40)), None, "past 5 cells");
+        let edge = ReincarnationSite::at_cell(TribeId::Blue, (0, 0), 64);
+        assert!(edge.levelling_reaches((127, 0), level_radius(Ticks::new(6))), "across the map's edge: 1.5 cells and half a cell out");
+    }
 
     #[test]
     fn welcomes_the_ring_around_it_across_the_edge() {

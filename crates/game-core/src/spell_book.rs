@@ -7,7 +7,7 @@ use pop3_format::{Constants, Level, LevelHeader};
 
 pub const MAX_CHARGES: u8 = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SpellKind {
     Blast,
     Convert,

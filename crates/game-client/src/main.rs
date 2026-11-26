@@ -7,12 +7,15 @@ mod angel_meteor;
 mod angel_of_death;
 mod armageddon;
 mod audio;
+mod audio_ambience;
 mod audio_cues;
 mod audio_load;
 mod audio_drums;
+mod audio_ids;
 mod audio_mix;
 mod audio_source;
 mod audio_space;
+mod audio_world;
 mod blast_fireball;
 mod blast_impact;
 mod blueprint;
@@ -120,7 +123,7 @@ fn main() {
         }
     }
     app
-        .add_plugins((user_settings::UserSettingsPlugin, audio_cues::AudioCuesPlugin, audio::SoundPlugin { debug: opts.debug_audio, device_muted: opts.mute, original_dir: opts.use_original.then(pop3_format::install::find_install).flatten().map(|i| pop3_format::install::subdir(&i, "Sound")) }))
+        .add_plugins((user_settings::UserSettingsPlugin, audio_cues::AudioCuesPlugin, audio_world::AudioWorldPlugin, audio_ambience::AudioAmbiencePlugin, audio::SoundPlugin { debug: opts.debug_audio, device_muted: opts.mute, original_dir: opts.use_original.then(pop3_format::install::find_install).flatten().map(|i| pop3_format::install::subdir(&i, "Sound")) }))
         .add_plugins((
             ((world::WorldPlugin { level_arg: opts.level_arg, use_original: opts.use_original },
             ground_material::GroundMaterialPlugin),

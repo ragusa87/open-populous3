@@ -20,32 +20,264 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// A family of sounds, one of the original's sound ids (sound.md "Sound ids"): its variants (`chop1`..`chop5`)
-/// are interchangeable. Filled in as sounds are wired.
+/// A family of sounds, one of the original's sound ids (sound.md "Sound id table", `id`): its variants (`chop1`..
+/// `chop5`) are interchangeable. Named for what plays it; crowd sizes are 1, 2, 3 and 4 or more.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SoundCue {
-    /// A menu entry picked.
+    // The interface.
+    /// A menu entry picked (`confirm`).
     Click,
     /// An intro flyby starts.
     FlybyStart,
     /// The player cancels a flyby.
     FlybyCancel,
-    /// Followers (braves, warriors, firewarriors) selected, by crowd size (1, 2, 3 or more).
+    // Selection and order voices.
+    /// Followers (braves, warriors, firewarriors, wildmen) selected, by crowd size.
     FollowerBow(u8),
-    /// Spies selected, one or several.
     SpyBow(u8),
-    PreacherBow,
+    PreacherBow(u8),
     ShamanSelect,
-    /// Followers ordered.
     FollowerOk,
-    /// Spies ordered, one or several.
     SpyOk(u8),
-    PreacherOk,
+    PreacherOk(u8),
     ShamanYes,
-    /// A reincarnation site's stone rising out of the ground (the original's sound 0x9F).
+    // People.
+    /// A death cry (not a shaman's).
+    Death,
+    /// The player's shaman dies.
+    ShamanDie,
+    /// Another tribe's shaman dies.
+    EnemyShamanDie,
+    /// A ghost vanishes.
+    GhostDie,
+    /// The drowning cry.
+    Drown,
+    /// Thrown into the air rising fast (not a shaman).
+    IntoAir,
+    /// Sucked into a whirlwind (not a shaman).
+    IntoWind,
+    /// The player's shaman thrown or sucked up.
+    ShamanScream,
+    /// Another tribe's shaman thrown or sucked up.
+    EnemyShamanScream,
+    /// A thrown person lands hard and lives (not a shaman, not a wildman).
+    Land,
+    /// A thrown shaman lands hard.
+    ShamanLand,
+    /// The player's shaman casts: her shout for the spell.
+    CastShout(game_core::spell_book::SpellKind),
+    /// Another tribe's shaman casts.
+    EnemyCastShout(game_core::spell_book::SpellKind),
+    /// A person on fire screaming.
+    OnFire,
+    /// A wildman turned into a brave.
+    Converted,
+    /// Someone turns invisible.
+    Invisible,
+    /// Someone visible again.
+    InvisibleOff,
+    /// A wildman muttering.
+    Mutter,
+    // Work.
+    /// A brave chopping a tree, hacking at a building.
+    Chop,
+    /// A brave picking up wood.
+    ChopPickUp,
+    /// A brave hammering at a building.
+    Hammer,
+    /// A brave levelling a foundation.
+    Stomp,
+    /// Eating, drinking: two ids each, half the time one, half the other.
+    Eat,
+    WildEat,
+    Drink,
+    WildDrink,
+    /// The completion bell.
+    BuildingDone,
+    // Spells and their effects.
+    /// A shot launched: Blast's fireball, a firewarrior's bolt.
+    Whoosh,
+    /// An explosion.
+    BlastImpact,
+    /// Lightning's thunder.
+    Thunder,
+    /// A splash on the sea.
+    Splash,
+    /// The whirlwind's wind, a variety loop.
+    Wind,
+    /// The swarm, a variety loop.
+    Swarm,
+    /// The swamp bubbling, a variety loop.
+    Swamp,
+    /// Erosion's rumble, a repeat loop.
+    ErodeRumble,
+    /// Earthquake's rumble, a repeat loop, and its crack halfway.
+    QuakeRumble,
+    QuakeCrack,
+    /// The volcano's rumble, a repeat loop, and the cone starting to rise.
+    VolcanoRumble,
+    VolcanoRise,
+    /// A lava flow, a repeat loop.
+    Lava,
+    /// Fire on the ground, a variety loop, and where it catches.
+    GroundFire,
+    FireCatches,
+    /// A building burning, a variety loop.
+    BuildingFire,
+    /// A whirlwind or an earthquake tearing wood off a building.
+    WoodCrack,
+    /// A whirlwind snapping a branch off a tree.
+    BranchSnap,
+    /// Land Bridge cast: two ids layered.
+    BridgeCast,
+    BridgeCast2,
+    HypnotismCast,
+    GhostArmyCast,
+    ConvertCast,
+    FlattenCast,
+    /// The Angel of Death: cast, its meteor launched, the meteor landing.
+    AngelCast,
+    AngelFall,
+    AngelLand,
+    /// A spy throws a firebrand.
+    Throw,
+    // Vehicles.
+    BoatRide,
+    BalloonRide,
+    BoatExplode,
+    BalloonPop,
+    // Scenery and rituals.
+    /// A reincarnation site's stone rising out of the ground.
     StoneRise,
-    /// A stone head's nod.
+    /// A stone head talking.
     StoneHeadNod,
+    // Ambience.
+    /// The battle crowd, a repeat loop over many fights.
+    BattleCrowd,
+    /// The magical shield's hum.
+    ShieldHum,
+    /// One of the ambience bed's layers (`audio_ambience`).
+    Bed(crate::audio_ambience::Layer),
+    /// Seagulls over the open sea.
+    Gulls,
+    /// Wildlife where trees are, by the level's theme.
+    Wildlife(crate::audio_ambience::Wilds),
+}
+
+impl SoundCue {
+    /// The original's sound id (sound.md "Sound id table").
+    pub fn id(self) -> u8 {
+        let shout = |base: u8, spell| match spell_type(spell) {
+            0 => 0,
+            t => base + t,
+        };
+        let crowd = |n: u8, ids: [u8; 4]| ids[(n.clamp(1, 4) - 1) as usize];
+        match self {
+            SoundCue::Click => 0x6A,
+            SoundCue::FlybyStart => 0x6F,
+            SoundCue::FlybyCancel => 0x6E,
+            SoundCue::FollowerBow(n) => crowd(n, [0x58, 0x43, 0x44, 0x45]),
+            SoundCue::SpyBow(n) => crowd(n, [0x56, 0x46, 0x47, 0x48]),
+            SoundCue::PreacherBow(n) => crowd(n, [0x57, 0x49, 0x4A, 0x4B]),
+            SoundCue::ShamanSelect => 0x18,
+            SoundCue::FollowerOk => 0x37,
+            SoundCue::SpyOk(n) => crowd(n, [0x3B, 0x3C, 0x3D, 0x3E]),
+            SoundCue::PreacherOk(n) => crowd(n, [0x3F, 0x40, 0x41, 0x42]),
+            SoundCue::ShamanYes => 0x19,
+            SoundCue::Death => 0x10,
+            SoundCue::ShamanDie => 0x0F,
+            SoundCue::EnemyShamanDie => 0x88,
+            SoundCue::GhostDie => 0x22,
+            SoundCue::Drown => 0x11,
+            SoundCue::IntoAir => 0xC4,
+            SoundCue::IntoWind => 0xD2,
+            SoundCue::ShamanScream => 0x1A,
+            SoundCue::EnemyShamanScream => 0x89,
+            SoundCue::Land => 0x09,
+            SoundCue::ShamanLand => 0x1B,
+            // A spell with no type of its own (past armageddon) shouts nothing: id 0, silent.
+            SoundCue::CastShout(spell) => shout(0x74, spell),
+            SoundCue::EnemyCastShout(spell) => shout(0x8A, spell),
+            SoundCue::OnFire => 0x51,
+            SoundCue::Converted => 0x05,
+            SoundCue::Invisible => 0x31,
+            SoundCue::InvisibleOff => 0x35,
+            SoundCue::Mutter => 0x16,
+            SoundCue::Chop => 0x01,
+            SoundCue::ChopPickUp => 0x0A,
+            SoundCue::Hammer => 0x14,
+            SoundCue::Stomp => 0x02,
+            SoundCue::Eat => 0x03,
+            SoundCue::WildEat => 0xBE,
+            SoundCue::Drink => 0x04,
+            SoundCue::WildDrink => 0xBF,
+            SoundCue::BuildingDone => 0xD7,
+            SoundCue::Whoosh => 0xA1,
+            SoundCue::BlastImpact => 0xB2,
+            SoundCue::Thunder => 0xA2,
+            SoundCue::Splash => 0x2C,
+            SoundCue::Wind => 0xA3,
+            SoundCue::Swarm => 0xA4,
+            SoundCue::Swamp => 0xAA,
+            SoundCue::ErodeRumble => 0xA9,
+            SoundCue::QuakeRumble => 0xAD,
+            SoundCue::QuakeCrack => 0x15,
+            SoundCue::VolcanoRumble => 0xAF,
+            SoundCue::VolcanoRise => 0xB0,
+            SoundCue::Lava => 0xB5,
+            SoundCue::GroundFire => 0x06,
+            SoundCue::FireCatches => 0xB6,
+            SoundCue::BuildingFire => 0x53,
+            SoundCue::WoodCrack => 0x12,
+            SoundCue::BranchSnap => 0xD4,
+            SoundCue::BridgeCast => 0x29,
+            SoundCue::BridgeCast2 => 0xAB,
+            SoundCue::HypnotismCast => 0x2A,
+            SoundCue::GhostArmyCast => 0xA8,
+            SoundCue::ConvertCast => 0xB4,
+            SoundCue::FlattenCast => 0xAE,
+            SoundCue::AngelCast => 0xAC,
+            SoundCue::AngelFall => 0xD9,
+            SoundCue::AngelLand => 0xDA,
+            SoundCue::Throw => 0x36,
+            SoundCue::BoatRide => 0x4F,
+            SoundCue::BalloonRide => 0x4E,
+            SoundCue::BoatExplode => 0x4D,
+            SoundCue::BalloonPop => 0x4C,
+            SoundCue::StoneRise => 0x9F,
+            SoundCue::StoneHeadNod => 0xC1,
+            SoundCue::BattleCrowd => 0x6C,
+            SoundCue::ShieldHum => 0xC3,
+            SoundCue::Bed(layer) => layer.id(),
+            SoundCue::Gulls => 0x50,
+            SoundCue::Wildlife(wilds) => wilds.id(),
+        }
+    }
+}
+
+/// The original's spell type, for the cast shouts (sound.md "Sound id table"); 0 for spells past armageddon.
+pub fn spell_type(spell: game_core::spell_book::SpellKind) -> u8 {
+    use game_core::spell_book::SpellKind::*;
+    match spell {
+        Blast => 2,
+        Lightning => 3,
+        Whirlwind => 4,
+        Swarm => 5,
+        Invisibility => 6,
+        Hypnotism => 7,
+        Firestorm => 8,
+        GhostArmy => 9,
+        Erosion => 10,
+        Swamp => 11,
+        LandBridge => 12,
+        AngelOfDeath => 13,
+        Earthquake => 14,
+        Flatten => 15,
+        Volcano => 16,
+        Convert => 17,
+        Armageddon => 18,
+        MagicalShield | Teleport | Bloodlust => 0,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -295,9 +527,10 @@ pub const FX_FADE: f32 = 0.1;
 pub const MUSIC_FADE: f32 = 1.5;
 
 /// What `REPEAT_GAP` holds back: the same sound from the same cell (flat sounds share one). Ours: per cell, so
-/// the same sound from different places (a site's stones landing a turn apart) is not held back.
-pub fn repeat_key(cue: SoundCue, at: Option<Vec2>) -> (SoundCue, Option<(i32, i32)>) {
-    (cue, at.map(|p| (p.x.floor() as i32, p.y.floor() as i32)))
+/// the same sound from different places (a site's stones landing a turn apart) is not held back. A unit's own
+/// sound (eating, burning, work) by its id alone, as the original: a crowd of eaters does not chew all at once.
+pub fn repeat_key(cue: SoundCue, at: Option<Vec2>, owned: bool) -> (SoundCue, Option<(i32, i32)>) {
+    (cue, at.filter(|_| !owned).map(|p| (p.x.floor() as i32, p.y.floor() as i32)))
 }
 
 pub fn too_soon(last: Option<Duration>, now: Duration) -> bool {
@@ -331,34 +564,36 @@ pub fn waits(moment: Moment, positional: bool, info: &CueInfo) -> bool {
     }
 }
 
-/// How much a playing (or new) effect is worth keeping: its priority first, then fewer copies of the same
-/// sound, then closeness (sound.md "Mixing": the quietest-ranked is cut; the order of these is our reading).
+/// How much a playing (or new) effect is worth keeping (sound.md "Sound id table", voice stealing).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rank {
     pub priority: u8,
+    /// Copies of the same sound playing, itself included.
     pub copies: usize,
+    /// 0..1 (`audio_space::falloff`), 1 for a flat sound.
     pub closeness: f32,
+    /// A loop: each other copy halves it twice.
+    pub looped: bool,
 }
 
 impl Rank {
-    fn key(&self) -> (u8, std::cmp::Reverse<usize>, f32) {
-        (self.priority, std::cmp::Reverse(self.copies), self.closeness)
-    }
-
-    fn below(&self, other: &Rank) -> bool {
-        self.key().partial_cmp(&other.key()) == Some(std::cmp::Ordering::Less)
+    /// The original's score: priority x 256, halved once per 16 steps of remoteness (127 - closeness on 0..127),
+    /// x 1024, halved once per other copy of the same sound (twice for a loop).
+    pub fn score(&self) -> u64 {
+        let remote = 127 - (self.closeness.clamp(0.0, 1.0) * 127.0) as u32;
+        let copies = (self.copies.saturating_sub(1) * if self.looped { 2 } else { 1 }) as u32;
+        ((self.priority as u64 * 256) >> (remote / 16)) * 1024 >> copies.min(63)
     }
 }
 
-/// Room for a new effect among `playing`: Ok(None) free, Ok(Some(i)) by cutting `playing[i]`, Err if all
-/// outrank it.
+/// Room for a new effect among `playing`: Ok(None) free, Ok(Some(i)) by cutting the lowest-scored `playing[i]` if
+/// the new one scores at least as much, Err if not.
 pub fn make_room(playing: &[Rank], new: Rank) -> Result<Option<usize>, Skip> {
     if playing.len() < MAX_FX {
         return Ok(None);
     }
-    let lowest = (0..playing.len()).min_by(|&a, &b| playing[a].key().partial_cmp(&playing[b].key()).unwrap_or(std::cmp::Ordering::Equal));
-    match lowest {
-        Some(i) if playing[i].below(&new) => Ok(Some(i)),
+    match (0..playing.len()).min_by_key(|&i| playing[i].score()) {
+        Some(i) if playing[i].score() <= new.score() => Ok(Some(i)),
         _ => Err(Skip::Busy),
     }
 }
@@ -616,19 +851,19 @@ fn ranks(voices: &Playing, listener: &Listener) -> Vec<(Entity, Rank)> {
         .map(|(e, v)| {
             let copies = fx.iter().filter(|(_, o)| o.cue == v.cue).count();
             let closeness = v.at.map_or(1.0, |at| place(listener, at).map_or(0.0, |p| p.gain));
-            (*e, Rank { priority: v.info.priority, copies, closeness })
+            (*e, Rank { priority: v.info.priority, copies, closeness, looped: v.loop_key.is_some() })
         })
         .collect()
 }
 
 /// Makes room for a new effect: fades out the lowest-ranked one if the new one outranks it and `may_cut`.
-fn admit(played: &Played, cue: SoundCue, may_cut: bool, voices: &Playing, listener: &Listener, commands: &mut Commands) -> Result<(), Skip> {
+fn admit(played: &Played, cue: SoundCue, looped: bool, may_cut: bool, voices: &Playing, listener: &Listener, commands: &mut Commands) -> Result<(), Skip> {
     let ranked = ranks(voices, listener);
     if !may_cut && ranked.len() >= MAX_FX {
         return Err(Skip::Busy);
     }
     let copies = voices.iter().filter(|(_, v)| v.cue == Some(cue)).count() + 1;
-    let new = Rank { priority: played.info.priority, copies, closeness: played.placement.map_or(1.0, |p| p.gain) };
+    let new = Rank { priority: played.info.priority, copies, closeness: played.placement.map_or(1.0, |p| p.gain), looped };
     let list: Vec<Rank> = ranked.iter().map(|r| r.1).collect();
     if let Some(i) = make_room(&list, new)? {
         fade_out(commands, ranked[i].0, FX_FADE);
@@ -659,15 +894,15 @@ fn play_sounds(
                 result = Err(Skip::Held);
             } else if request.owner.is_some_and(|o| voices.iter().any(|(_, v)| v.owner == Some(o))) {
                 result = Err(Skip::OwnerBusy);
-            } else if too_soon(last.0.get(&repeat_key(cue, request.at)).copied(), now) {
+            } else if too_soon(last.0.get(&repeat_key(cue, request.at, request.owner.is_some())).copied(), now) {
                 result = Err(Skip::TooSoon);
-            } else if let Err(skip) = admit(played, cue, true, &voices, &listener.0, &mut out.commands) {
+            } else if let Err(skip) = admit(played, cue, false, true, &voices, &listener.0, &mut out.commands) {
                 result = Err(skip);
             }
         }
         out.log(|| describe_fx("fx", request.sound, request.at, &result));
         let Ok(played) = result else { continue };
-        last.0.insert(repeat_key(cue, request.at), now);
+        last.0.insert(repeat_key(cue, request.at, request.owner.is_some()), now);
         let voice = Voice { cue: Some(cue), info: played.info, at: request.at, owner: request.owner, ..Voice::new(Role::Effect) };
         out.spawn(&played, voice, PlaybackSettings::DESPAWN);
     }
@@ -738,7 +973,7 @@ fn run_loops(
         if let Ok(played) = &result {
             if waits(moment, state.at.is_some(), &played.info) {
                 result = Err(Skip::Held);
-            } else if let Err(skip) = admit(played, state.sound.cue, !state.started, &voices.p0(), &listener.0, &mut out.commands) {
+            } else if let Err(skip) = admit(played, state.sound.cue, true, !state.started, &voices.p0(), &listener.0, &mut out.commands) {
                 result = Err(skip);
             }
         }
@@ -996,22 +1231,29 @@ mod tests {
         assert!(too_soon(Some(ms(1000)), ms(1249)));
         assert!(!too_soon(Some(ms(1000)), ms(1250)));
         let stone = SoundCue::StoneRise;
-        assert_eq!(repeat_key(stone, Some(Vec2::new(6.5, 109.5))), repeat_key(stone, Some(Vec2::new(6.9, 109.1))), "same cell");
-        assert_ne!(repeat_key(stone, Some(Vec2::new(6.5, 109.5))), repeat_key(stone, Some(Vec2::new(10.5, 109.5))), "another stone");
-        assert_ne!(repeat_key(stone, None), repeat_key(stone, Some(Vec2::ZERO)));
+        assert_eq!(repeat_key(stone, Some(Vec2::new(6.5, 109.5)), false), repeat_key(stone, Some(Vec2::new(6.9, 109.1)), false), "same cell");
+        assert_ne!(repeat_key(stone, Some(Vec2::new(6.5, 109.5)), false), repeat_key(stone, Some(Vec2::new(10.5, 109.5)), false), "another stone");
+        assert_ne!(repeat_key(stone, None, false), repeat_key(stone, Some(Vec2::ZERO), false));
+        let eat = SoundCue::WildEat;
+        assert_eq!(repeat_key(eat, Some(Vec2::new(6.5, 109.5)), true), repeat_key(eat, Some(Vec2::new(40.5, 9.5)), true), "another eater");
     }
 
     #[test]
-    fn a_full_mix_cuts_the_lowest_ranked_for_a_better_one() {
-        let r = |priority, copies, closeness| Rank { priority, copies, closeness };
-        let mut playing = vec![r(1, 1, 0.9); MAX_FX - 1];
+    fn a_full_mix_cuts_the_lowest_scored_for_one_scoring_as_much() {
+        let r = |priority, copies, closeness| Rank { priority, copies, closeness, looped: false };
+        assert_eq!(r(0x80, 1, 1.0).score(), 0x80 * 256 * 1024);
+        assert_eq!(r(0x80, 1, 0.0).score(), (0x80 * 256 >> 7) * 1024, "127 steps away: halved 7 times");
+        assert_eq!(r(0x80, 3, 1.0).score(), 0x80 * 256 * 1024 / 4, "two other copies");
+        assert_eq!(Rank { looped: true, ..r(0x80, 2, 1.0) }.score(), 0x80 * 256 * 1024 / 4, "a loop's copy counts twice");
+        let mut playing = vec![r(0x80, 1, 0.9); MAX_FX - 1];
         assert_eq!(make_room(&playing, r(0, 1, 0.1)), Ok(None), "room left");
-        playing.push(r(1, 1, 0.2));
-        assert_eq!(make_room(&playing, r(1, 1, 0.5)), Ok(Some(MAX_FX - 1)), "the farthest of equal priority");
-        assert_eq!(make_room(&playing, r(1, 1, 0.1)), Err(Skip::Busy));
-        assert_eq!(make_room(&playing, r(2, 5, 0.0)), Ok(Some(MAX_FX - 1)), "priority first");
-        playing[3] = r(1, 4, 1.0);
-        assert_eq!(make_room(&playing, r(1, 1, 0.1)), Ok(Some(3)), "many copies of one sound go first");
+        playing.push(r(0x80, 1, 0.2));
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.5)), Ok(Some(MAX_FX - 1)), "the farthest of equal priority");
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.2)), Ok(Some(MAX_FX - 1)), "as much is enough");
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.0)), Err(Skip::Busy));
+        assert_eq!(make_room(&playing, r(0xFF, 1, 0.6)), Ok(Some(MAX_FX - 1)), "priority outweighs a little distance");
+        playing[3] = r(0x80, 8, 1.0);
+        assert_eq!(make_room(&playing, r(0x80, 1, 0.9)), Ok(Some(3)), "many copies of one sound go first");
     }
 
     #[test]

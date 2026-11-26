@@ -72,22 +72,32 @@ angel of death, in no level; only 2 spies in all 41 levels), owner =
 tribe (255 = none: wildmen). Shamans spawn at their reincarnation site instead (one per site, ids first). Level 10:
 5 braves, 4 warriors, 4 preachers for the player, 5 warriors, 2 preachers, 4 firewarriors for green, 20 wildmen.
 In the files, persons stand at a cell centre (4978 of 5271) or anywhere, and carry no extra data (no angle).
-Wildmen placed in the ring of cells around a reincarnation site (`ReincarnationSite::welcomes`, 1 cell either
-axis) are that tribe's first followers: they start as its braves. In the original they are converted for free when
-the shaman appears, no Convert spell needed (level 2: the 8 around blue's site; most levels place 6 or 8 per
-tribe this way, level 3 has 12). The conversion animation is not drawn.
+Wildmen placed around a reincarnation site are that tribe's first followers, no Convert spell needed (level 2: the
+8 around blue's site; most levels place 6 or 8 per tribe this way, level 3 has 12). On a level's site (`animated`)
+they stay wildmen until the build ritual's levelling disc reaches their cell (`GameMap::convert_in_levelling`:
+160 world units a turn up to 5 cells, each cell tested at its corner, so the + side first; pop3-rev-analysis.md
+"Levelling"), then become braves of its tribe, every time the levelling runs; a round disc and no population cap
+are ours. On a site built from the start (sandboxes, generated maps) those in the ring of cells around it
+(`ReincarnationSite::welcomes`, 1 cell either axis) start as its braves. The conversion flash is not drawn (the
+chime plays), and the brave keeps the wildman's id (the original makes a new person).
 Wildmen are neutral (not selectable), drawn with their original anims (0 walk, 1 stand, 3 sit, 31 flung, 47 down)
 or else a generated figure in a hide with a mane, or the brave's rendered sheets in a hide colour.
 
 Idle wildmen wander, fully traced (pop3-rev-analysis.md "Wildmen"): on their own rhythm (`wildman::SEEK_EVERY`, a
 guess - the trace gives state 8 no rhythm of its own), an idle one looks for a tree within
-`TREE_SEARCH_RADIUS_CELLS` (18, confirmed) to walk to and eat beside (`Action::Grazing { drink: false, .. }`,
+`TREE_SEARCH_RADIUS_CELLS` (12, the same byte as the shore search, pop3-rev-analysis.md "Eating at a tree") to walk to and eat beside (`Action::Grazing { drink: false, .. }`,
 `Pose::Eat`, original anim 2); failing that, a shore cell within `SHORE_SEARCH_RADIUS_CELLS` (12, confirmed) to
 walk to and drink at (`Action::Grazing { drink: true, .. }`, `Pose::Drink`, anim 4) - both original-asset only,
 CC0 art falls back to idle. No plant scenery (types 7/8) is modelled yet, so only trees are searched; "shore" is
 `wildman::is_shore_cell`'s own neighbour-based approximation (dry, walkable, a sea cell among its 4 neighbours),
-standing in for the original's own untranslated coastal-shape table - **both `[ours]`**. It lingers
-`wildman::GRAZE_TICKS` (a guess, the trace gives no timer either) before going idle and searching again. No
+standing in for the original's own untranslated coastal-shape table - **both `[ours]`**. Beside a tree it eats
+`wildman::meal_ticks` (50-99 turns, 4.2-8.3 s) and looks for a tree again only `wildman::tree_rest` (128-252
+turns, 10.7-21 s) after arriving (pop3-rev-analysis.md "Eating at a tree"); while that rest runs it stays idle
+(`[ours]`: whether the shore search runs then is not traced). At the shore it lingers `wildman::GRAZE_TICKS` (a
+guess) before going idle and searching again. It arrives within 120 units of its tree on both axes and eats facing
+it; it gives the walk up after 128 turns (`TREE_WALK_TICKS`) or once the tree is gone, and stops eating once the
+tree is gone (the original first looks in its cell for someone to "notice", state 34: not done). The walk to the
+shore is given up once its spot is no longer shore (state 6's own timer is not pinned: none here). No
 hunger or thirst stat exists anywhere, confirmed absent: both searches only ever pick where an idle animation
 plays, nothing is consumed. A wildman idling at its shore spot genuinely drowns fairly often - no special
 mechanic, just the ordinary per-turn drowning check re-testing the exact fine-grained spot every turn with no
