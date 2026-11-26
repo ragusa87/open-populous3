@@ -282,7 +282,10 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   modelled in this engine at all, so only trees are searched - a narrower destination set than the original's own,
   `[ours]`; "shore" substitutes `wildman::is_shore_cell`'s own neighbour-based approximation for the original's
   untranslated coastal-shape table, also `[ours]`. `wildman::SEEK_EVERY` (how often it looks) and `GRAZE_TICKS`
-  (how long it lingers) are both guesses: the trace gives neither a number. Drowning at the shore needs no code
+  (how long it lingers) are both guesses. Now traced (pop3-rev-analysis.md "Eating at a tree", measured): the meal
+  lasts 50-99 turns (42-83 ticks) from arriving within 120 units of the tree, the walk is given up after 128 turns
+  (107 ticks), the next tree search waits 128-252 turns (107-210 ticks) after a meal, and the tree search radius is
+  12 cells, the same as the shore's, not 18. Drowning at the shore needs no code
   of its own, confirmed to fall out of the generic per-turn check already. Still open, unrelated to the loop
   itself: the literal VSTART id each state resolves to was already known and is now wired (eat=2, drink=4); a
   wildman's death spirit-rise variant (see the death/spirit item below); whether an explicit attack order is
@@ -2082,9 +2085,11 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   - work sounds (eating and drinking too) every 8 turns of the work (`WORK_EVERY`) rather than on their
     animation's sync frame (the client sees no animation frame: give the sim or the views the frame, then play on
     it, the sync frame dropped if the animation changes first);
-  - **question for a spec session**: the eat ids (`0x03`, `0xBE`) fire in person state 15, but a wildman eats
-    beside a tree in state 5 (pop3-rev-analysis.md "Wildmen"): does a wildman at a tree make the eat sound at
-    all, and which state is 15? Ours plays it for `Action::Grazing { drink: false }`;
+  - eating at a tree: answered (pop3-rev-analysis.md "Eating at a tree", measured on level 17). A wildman walks to
+    its tree in state 5 and eats beside it in state 15, so yes, it makes the eat sound, and ours is right to play it
+    for `Action::Grazing { drink: false }`: keep it. Only the timing differs: the original plays `0x03` or `0xBE`
+    (50/50) whenever no sound is attached to the wildman, so back to back for the whole 50-99 turn meal, not every
+    8 turns;
   - the cast shout as the cast starts, not at the spell's launch;
   - the shield hum within 48 cells of the listener for "drawn near the camera";
   - the lava loop runs to the effect's end (the original stops it once the flow stops growing);
