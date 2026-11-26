@@ -122,7 +122,8 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
 - Channels: Music and Fx under a Master volume, plus Mute all (saved). UI sounds go on Fx, flat: centred, full
   volume.
 - A `SoundCue` stands for one of the original's sound ids: a family of variants with its own volume (0-127),
-  priority and "plays while paused" flag (the id's, sound.md "Sound id table"). `Pick::Any` is the original's random pick; `Pick::Variant(n)` plays
+  priority (the id's, "Sound id table") and "plays while paused" flag (in the original that flag belongs to the
+  call, not the id: see "Sound ids"). `Pick::Any` is the original's random pick; `Pick::Variant(n)` plays
   exactly variant `n` (`chop4`), never another one in its place.
 - Mixed as the original mixes them: the listener 16 cells from the camera's look-at point along its heading, 2D
   distances on the wrapped map, a cut-off at 48 cells (not started past it, faded out once out of it), the volume
@@ -154,8 +155,8 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
 - `Soundd2` cues through the sound id table ("Sound id table", `audio_ids.rs`): each `SoundCue` names its id
   (`SoundCue::id`), plays a random entry of that id's range with the id's volume and priority; the info-window
   click (`confirm`) plays while paused. Ids with no sample stay silent, and the spells past armageddon (shield,
-  teleport, bloodlust) have no shout. Not used: the fight bank (`POPfightnew.SDT`, its ids' ranges are not in
-  the table), the sync frames.
+  teleport, bloodlust) have no shout. Not used: the fight bank (`POPfightnew.SDT`: its 9 ids at the same entry
+  indices, "Sound ids"), the sync frames.
 - Interface and voices (`audio_cues.rs`): the selection's bow lines and the order answers by type and crowd size
   1/2/3/4+ (wildmen count as followers), the flyby's start (`0x6F`) and cancel (`0x6E`), the menu click
   (`0x6A`), a reincarnation site's stones rising (`0x9F`, every second stone, "Pillars" [exe]) and each stone
@@ -218,18 +219,32 @@ From the original exe (pop3-rev-analysis.md would hold the formal spec; the full
 table" below).
 
 ### Sound ids
-- The game plays a **sound id** (0x00-0xE4), never a bank index. A per-id record gives: first entry and variant
-  count in `Soundd2` (one variant picked at random per play), an optional alternative range in
-  `POPfightnew.SDT` used whenever that bank is loaded (the punch/sword/yell/grunt ids of melee and battle cries),
-  priority, a pitch spread in percent (pitch = 100 +/- random(spread)) and a volume 0-127. Entry numbers in that
-  record are 1-based (0 = no sound; 23 ids are silent that way).
+- The game plays a **sound id** (0x00-0xE4), never a bank index. All 229 records are in
+  [sound-ids.tsv](sound-ids.tsv), read from the exe:
+  - `bank`, `first`, `count`: the entries one play picks from, at random, `first..first+count-1` (0-based entry
+    indices of that bank). `-` = silent: 23 ids have no sample, two of them still played by the game (pointer
+    mode reset, minimap click), so they must stay silent rather than fall back to anything.
+  - `fight` (9 ids: punches, swords, sword flashes, attack yells, hit grunts) = the same indices in
+    `POPfightnew.SDT`. The record has no separate range for that bank: without `POPfightnew` the original plays
+    the same indices from `Soundd2`, which are unrelated sounds (`convert`, `chop`...), so treat the fight bank as
+    required for these ids.
+  - `priority` (0x20-0xFF: 0x20/0x40 faint ambience, 0x80 most sounds, 0xB4 spells, 0xE6 volcano, 0xFF UI and
+    voices) ranks the sound when the mix is full. `volume` 0-127, multiplied by the distance falloff.
+  - `sync_frame` (7 ids: chop, stomp, eat, drink, build, wildman eat/drink): a positional sound waits until its
+    unit's animation reaches that frame, so the hit lands on the axe/foot frame. The chop and build plays also
+    drop it if the unit's animation changes before that frame.
+  - `played` = `no`: in the table but never played by the game (see "Not played at all").
+  - The record also holds a pitch spread, never applied (below): ignore it.
+- Nothing in the record says "plays while paused": that is a flag of the play call. Only one sound uses it, the
+  `confirm` click (0x6A) of the info window's buttons; every other sound, `confirm` from anywhere else included,
+  is suppressed while paused.
 - `soundd2low.SDT` is the same id table read against the low bank, chosen by the "high quality sound" option.
 - Positional sounds are attached to a unit and attenuated by distance to the local camera, culled beyond a
   cut-off. UI sounds play flat. A unit with a sound attached is not given another ambient sound until it ends,
   which is how per-tick sounds (crackle, eating, drinking) sound continuous instead of stacking.
 - Looping sounds (fire, wind, swarm, swamp, guard post, boat/balloon ride, burning building) are started with a
   loop flag and explicitly stopped by the code that owns them.
-- While paused only sounds flagged for it play (info window clicks); over overlay screens only UI sounds play.
+- Over overlay screens only UI sounds play.
 
 ### Mixing (positional sounds, effects)
 - Listener: a point 16 cells from the camera's look-at point along its heading. Distances are 2D on the wrapped

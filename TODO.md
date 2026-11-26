@@ -2079,8 +2079,9 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   library is filled from the install (next item). The low-quality bank is left out on purpose.
 - [ ] Fill the `SoundLibrary`: music (`PopDrones22`, Layer II through symphonia), the drum banks and `Soundd2`
   through the sound id table (sound.md "Sound id table", `audio_ids.rs`: entry ranges, volume, priority) are
-  loaded. Left: the fight bank `POPfightnew.SDT` (punches, swords, yells, hit grunts: the table gives their names
-  but not their entry indices in that bank - **question for a spec session**), CC0 sounds for `--no-original`.
+  loaded. Left: the fight bank `POPfightnew.SDT` (punches, swords, yells, hit grunts: the 9 fight ids of
+  [sound-ids.tsv](docs/specs/sound-ids.tsv) at the same entry indices in that bank, which is required for them,
+  sound.md "Sound ids"), CC0 sounds for `--no-original`.
 - [ ] Play SFX from game events: people (deaths, drowning, screams, landing grunts, cast shouts, burning,
   conversion, invisibility), work, spell effects, shots, vehicles, burning and finished buildings, the battle
   crowd and the shield hum are wired by the id table's triggers (`audio_world.rs`), with the selection/order voices,
@@ -2088,7 +2089,7 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   in code and sound.md:
   - work sounds every 8 turns of the work (`WORK_EVERY`) rather than on their
     animation's sync frame (the client sees no animation frame: give the sim or the views the frame, then play on
-    it, the sync frame dropped if the animation changes first);
+    it; chop and build drop the sound if the animation changes before that frame, eat and drink do not);
   - the cast shout as the cast starts, not at the spell's launch;
   - the shield hum within 48 cells of the listener for "drawn near the camera";
   - the lava loop runs to the effect's end (the original stops it once the flow stops growing);
