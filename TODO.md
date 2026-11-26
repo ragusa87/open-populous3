@@ -996,14 +996,18 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   change), just the same known "key views by stable id" cleanup already flagged elsewhere in this file for
   buildings/units.
 - [ ] Stone totem: check in the game what it does after a completion that is not its last, the timings (turn 2 s, hold 1 s, sink 4 s) and the smoke; other turns to try are listed in worship.md.
-- [ ] Totem gifts not handled yet (logged as `Reward::Unhandled`): effects (land bridge, lightning...), revealed scenery and triggers, vehicles, the Angel of Death of type 5 totems; mana once mana exists. Check what `NumOccurences` 0 means.
+- [x] Totem gifts (worship.md "Gifts"): every target a prayer trigger has in the levels is given, through `Reward::Cast` (the spell effects), `Teleport`, `WakeTotem` (dormant chained heads), `Person`, `PlaceBuilding`, `Vehicle`; targeted things are no longer placed at load. Left: effects 5 (level 9), 39 (level 21), 91 (level 5), 92 (level 22) - **question for a spec session**: what each does as a trigger target; the Angel of Death a type 5 trigger brings (level 5, untraced); 89/90 atlantis (below); the walk-in triggers' targets (level 21's effects 75, 79, 85) wait for walk-in triggers themselves ("Trigger semantics"). Check what `NumOccurences` 0 means.
 - [ ] Pyramids: done for the player (`game_core::worship`); rewards per tribe once books are per tribe (today `granted` updates the shared level books and the player's panels); `PrayTime`'s unit is now confirmed live (worship.md "Open", pop3-rev-analysis.md "The vault"): the same 4-turn tick as a totem's gauge, cap = `PrayTime` directly. The drain speed with nobody praying is also answered, from the shared gauge code itself (pop3-rev-analysis.md "Prayer at triggers" "The gauge" - `gauge -= C²` every 4-turn step when nobody counts, same magnitude as a full-staffed fill, not the `(C−n+1)²`-divided partial-attendance rate) - the vault is confirmed to run through that exact code path with no vault-specific math ("The vault"), so no separate live trial is needed to settle this one.
 - [ ] Prisons: levels where the shaman starts imprisoned; she is locked inside (units.md "Locked units") until freed.
   Level 15 has one (so far the only level seen with a prison). Observed live: a pyrotechnic hit knocked the
   imprisoned shaman outside the prison and killed her, so being locked inside does not make her unattackable/
   unkillable as assumed - check what actually protects her (if anything) and what ejects her from the building.
 - [ ] Generated pyramid: fold its capstone like the original's top (a separate mesh in `tools/generate_buildings.py`).
-- [ ] Pyramids: draw the reward as an icon at the top (cursor sprites 38-57 spells, 58-65 buildings), gone once the reward is granted.
+- [ ] Pyramids: draw the reward as an icon at the top, as the original (pop3-rev-analysis.md "The reward icon over a
+  vault"): the panel's glyph of the reward (`hfx0-0.dat` 1056-1083 by kind and reward, not the cursor sprites), a
+  fixed billboard 1072 units above the vault's ground; under it, 80 lower, the looping glow (`hfx0-0.dat`
+  1417-1432) and a dynamic ground light. Only for permanent discoveries. Remove both when the vault fires
+  (`Vault::grant`), not when the reward lands.
 - [ ] HUD: show the gauge over the totem/pyramid and who is praying.
 - [ ] HUD sparkle/flash when a discovery is granted at a totem or pyramid (not traced: no sparkle effect or
   timing pinned down yet, just a gap noticed - a reward landing today has no feedback of its own beyond whatever

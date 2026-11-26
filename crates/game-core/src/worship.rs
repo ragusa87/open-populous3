@@ -15,7 +15,8 @@ use crate::mana::Mana;
 use crate::spell_book::{Availability, SpellBook, SpellKind};
 use crate::totem::{TotemId, TRIBES};
 use crate::unit::{torus_delta, Action, Inside, Order, UnitId, UnitKind, WorshipAt};
-use crate::tribes::TribeId;
+use crate::terrain::DirtyRect;
+use crate::tribes::{Owner, TribeId};
 
 /// Within this many world units of the vault's middle she has reached it.
 const MIDDLE: i32 = 64;
@@ -46,7 +47,7 @@ impl GameMap {
     /// the shaman only for a shaman-only totem, else the followers and the shaman; none at an
     /// exhausted totem.
     pub fn totem_orders(&self, player: TribeId, units: &[UnitId], totem: usize) -> Vec<Command> {
-        let Some(t) = self.totems.get(totem).filter(|t| !t.is_exhausted()) else { return Vec::new() };
+        let Some(t) = self.totems.get(totem).filter(|t| !t.is_exhausted() && !t.is_gone()) else { return Vec::new() };
         let at = WorshipAt::Totem { id: t.id };
         // A ghost shaman can't worship a shaman-only totem either (docs/plans/ghost.md): "has no real body".
         let may = |u: &crate::unit::Unit| if t.shaman_only { u.kind == UnitKind::Shaman && !u.statuses.ghost } else { u.kind != UnitKind::Wildman };
@@ -88,8 +89,9 @@ impl GameMap {
     /// Each tick, each totem: its queue keeps the units praying at it in the order they started; on
     /// `gauge::RHYTHM`'s ticks each tribe's gauge fills with its first `prayers` of them on the soft
     /// curve, drains linearly without any; full, the tribe gets the gifts, its gauge starts again, and
-    /// an exhausted totem sends its prayers away.
-    pub(crate) fn tend_totems(&mut self) {
+    /// an exhausted totem sends its prayers away. The ground its gifts reshaped at once.
+    pub(crate) fn tend_totems(&mut self) -> Vec<DirtyRect> {
+        let mut dirty = Vec::new();
         let update = crate::gauge::RHYTHM.fires(self.now, 0);
         for k in 0..self.totems.len() {
             let at = WorshipAt::Totem { id: self.totems[k].id };
@@ -123,7 +125,7 @@ impl GameMap {
                 totem.given += 1;
                 totem.since_given = 0;
                 for gift in totem.gifts.clone() {
-                    self.give(tribe, gift);
+                    dirty.extend(self.give(tribe, gift));
                 }
             }
             if self.totems[k].is_exhausted() {
@@ -134,6 +136,7 @@ impl GameMap {
                 }
             }
         }
+        dirty
     }
 
     /// Unit `i` is locked (`Unit::locked`: tumbling or lifted) or inside a vault (walking in, at its
@@ -173,7 +176,7 @@ impl GameMap {
                     if let Some(reward) = vault.grant()
                         && let Some(owner) = self.units[i].owner.tribe()
                     {
-                        self.give(owner, reward);
+                        let _ = self.give(owner, reward);
                     }
                     self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
                 }
@@ -184,7 +187,8 @@ impl GameMap {
     }
 
     /// `reward` goes to tribe `owner`: kept in `granted` and made available in its books or added to its mana.
-    fn give(&mut self, owner: TribeId, reward: Reward) {
+    /// The ground it reshaped at once, if any.
+    fn give(&mut self, owner: TribeId, reward: Reward) -> Option<DirtyRect> {
         self.granted.push((owner, reward));
         let i = owner.as_usize();
         match reward {
@@ -213,8 +217,31 @@ impl GameMap {
                     fog.reveal_area(owner, cell);
                 }
             }
+            Reward::Cast(spell) => return self.release(owner, spell),
+            Reward::Teleport { to } => {
+                if let Some(u) = self.shaman_mut(owner) {
+                    u.cast_teleport(to);
+                }
+            }
+            Reward::WakeTotem { at } => {
+                let cell = |p: (u16, u16)| (p.0 / 512, p.1 / 512);
+                for t in self.totems.iter_mut().filter(|t| t.dormant && cell((t.x, t.z)) == cell(at)) {
+                    t.dormant = false;
+                }
+            }
+            Reward::Person { kind, owner: of, at } => {
+                self.spawn(of.unwrap_or(Owner::Tribe(owner)), kind, at);
+            }
+            Reward::PlaceBuilding { kind, owner: of, at, facing } => {
+                self.add_building(crate::building::Building::new(kind, of.unwrap_or(Owner::Tribe(owner)), at.0, at.1, facing));
+                self.update_walls();
+            }
+            Reward::Vehicle { kind, owner: of, at } => {
+                self.add_vehicle(crate::vehicle::Vehicle::new(kind, of.unwrap_or(Owner::Tribe(owner)), at, crate::angle::Angle::ZERO));
+            }
             Reward::Unhandled { .. } => {}
         }
+        None
     }
 }
 
@@ -413,6 +440,62 @@ mod tests {
         assert!(map.totem_orders(TribeId::Blue, &braves(&map, 3), pole).is_empty());
         assert_eq!(map.totem_orders(TribeId::Blue, &[shaman], pole).len(), 1);
         assert_eq!(map.totem_at((map.totems[pole].x + 100, map.totems[pole].z)), Some(pole));
+    }
+
+    #[test]
+    fn a_land_bridge_gift_raises_the_bridge_for_the_tribe() {
+        let mut map = GameMap::sandbox_worship();
+        let s = map.shaman_of(TribeId::Blue).unwrap();
+        let from = ((s.x / 512) as i32, (s.z / 512) as i32);
+        let to = (from.0 + 6, from.1);
+        let _ = map.give(TribeId::Blue, crate::building::Reward::Cast(crate::spell::Spell::LandBridge { from, to }));
+        let bridge = map.effects.iter().find_map(|(_, e)| match e.kind {
+            crate::effect::EffectKind::LandBridge(ref b) => Some((e.owner, b.from, b.to)),
+            _ => None,
+        });
+        assert_eq!(bridge, Some((crate::tribes::Owner::Tribe(TribeId::Blue), from, to)));
+    }
+
+    #[test]
+    fn a_dormant_totem_hides_until_a_gift_wakes_it() {
+        let mut map = GameMap::sandbox_worship();
+        let k = totem_of(&map, 1, false);
+        map.totems[k].dormant = true;
+        let (x, z) = (map.totems[k].x, map.totems[k].z);
+        let braves = braves(&map, 1);
+        assert_eq!(map.totem_at((x, z)), None, "nothing to see");
+        assert!(map.totem_orders(TribeId::Blue, &braves, k).is_empty(), "nothing to pray at");
+        let _ = map.give(TribeId::Blue, crate::building::Reward::WakeTotem { at: (x + 100, z + 100) });
+        assert_eq!(map.totem_at((x, z)), Some(k), "risen");
+        assert!(!map.totem_orders(TribeId::Blue, &braves, k).is_empty());
+    }
+
+    #[test]
+    fn people_vehicles_and_buildings_given_appear_for_the_tribe_unless_the_level_owns_them() {
+        let mut map = GameMap::sandbox_worship();
+        let s = map.shaman_of(TribeId::Blue).map(|s| (s.x, s.z)).unwrap();
+        let at = (s.0 + 2048, s.1);
+        let (units, vehicles, buildings) = (map.units.len(), map.vehicles.iter().count(), map.buildings.len());
+        let _ = map.give(TribeId::Blue, crate::building::Reward::Person { kind: UnitKind::Warrior, owner: None, at });
+        let _ = map.give(TribeId::Blue, crate::building::Reward::Person { kind: UnitKind::Wildman, owner: Some(Owner::Wild), at });
+        let _ = map.give(TribeId::Blue, crate::building::Reward::Vehicle { kind: crate::vehicle::VehicleKind::Boat, owner: None, at });
+        let _ = map.give(TribeId::Blue, crate::building::Reward::PlaceBuilding { kind: crate::building::BuildingKind::DrumTower, owner: None, at: (s.0, s.1 + 4096), facing: 0 });
+        assert_eq!(map.units.len(), units + 2);
+        assert!(map.units.iter().any(|u| u.kind == UnitKind::Warrior && u.owner == TribeId::Blue && (u.x, u.z) == at));
+        assert!(map.units.iter().any(|u| u.kind == UnitKind::Wildman && u.owner == Owner::Wild));
+        assert_eq!(map.vehicles.iter().count(), vehicles + 1);
+        assert_eq!(map.buildings.len(), buildings + 1);
+    }
+
+    #[test]
+    fn a_teleport_gift_moves_the_tribes_shaman() {
+        let mut map = GameMap::sandbox_worship();
+        let s = map.shaman_of(TribeId::Blue).map(|s| (s.x, s.z)).unwrap();
+        let to = (s.0 + 3 * 512, s.1);
+        let _ = map.give(TribeId::Blue, crate::building::Reward::Teleport { to });
+        map.run(crate::time::Ticks::secs(3));
+        let s = map.shaman_of(TribeId::Blue).unwrap();
+        assert!(crate::unit::torus_delta(s.x, to.0).abs() < 512 && crate::unit::torus_delta(s.z, to.1).abs() < 512, "she is there");
     }
 
     #[test]

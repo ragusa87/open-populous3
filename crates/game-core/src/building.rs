@@ -280,6 +280,19 @@ pub enum Reward {
     Mana(u32),
     /// Effect 81 "reveal fog area" on that cell (`fog::Fog::reveal_area`).
     RevealFog { cell: (i32, i32) },
+    /// An effect a trigger creates that a spell makes too (volcano, lightning, land bridge...): that spell's
+    /// effect for the tribe, at the effect's place (`GameMap::release`: no shaman, mana or range needed).
+    Cast(crate::spell::Spell),
+    /// Effect 88 "teleport": the tribe's shaman teleports there.
+    Teleport { to: (u16, u16) },
+    /// A stone head (and its trigger) a trigger creates: the dormant totem standing there rises.
+    WakeTotem { at: (u16, u16) },
+    /// A person a trigger creates; `owner` None: the tribe the gift goes to (`CreatePlayerOwned`).
+    Person { kind: crate::unit::UnitKind, owner: Option<crate::tribes::Owner>, at: (u16, u16) },
+    /// A finished building a trigger creates.
+    PlaceBuilding { kind: BuildingKind, owner: Option<crate::tribes::Owner>, at: (u16, u16), facing: u8 },
+    /// A vehicle a trigger creates.
+    Vehicle { kind: crate::vehicle::VehicleKind, owner: Option<crate::tribes::Owner>, at: (u16, u16) },
     /// A trigger target not handled yet (an effect, a revealed thing, a vehicle...): its thing kind
     /// and model, only logged.
     Unhandled { kind: u8, model: u8 },
@@ -392,12 +405,13 @@ impl Building {
     }
 }
 
-/// The level's buildings, in thing order.
+/// The level's buildings, in thing order; not those a trigger creates (`totem::targeted`).
 pub fn buildings_from_level(level: &Level) -> Vec<Building> {
+    let targeted = crate::totem::targeted(level);
     level
         .things
         .iter()
-        .filter(|t| t.kind == KIND_BUILDING)
+        .filter(|t| t.kind == KIND_BUILDING && !targeted.contains(&t.slot))
         .map(|t| {
             let kind = BuildingKind::from_model(t.model);
             let vault = (kind == BuildingKind::Vault).then(|| Vault::from_level(level, t));

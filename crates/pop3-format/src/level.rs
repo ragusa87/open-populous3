@@ -29,6 +29,7 @@ pub const ACCESS_ENTRIES: usize = 50;
 /// `Thing::kind` values (subset, see docs/specs/level-format.md).
 pub const KIND_PERSON: u8 = 1;
 pub const KIND_BUILDING: u8 = 2;
+pub const KIND_VEHICLE: u8 = 4;
 pub const KIND_SCENERY: u8 = 5;
 pub const KIND_GENERAL: u8 = 6;
 pub const KIND_EFFECT: u8 = 7;

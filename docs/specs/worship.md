@@ -81,10 +81,21 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   (±6°, one nod every 1.6 s, smooth both ways). Done: `totems::split_head`, `nod_angle`; the generated stand-in
   is a pedestal block with a head block nodding the same way.
 - The other looks do not move (to check in the game).
-- Gifts (`totem::gift`, from the trigger's targets): a spell (`Reward::Spell`, a "once" discovery
-  `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building, mana (`Reward::Mana`, added to the
-  tribe's mana pool), anything else `Reward::Unhandled { kind, model }` (effects, revealed things, the Angel of
-  Death), only logged. The Worship sandbox's totems give one cast of a spell, mana, or (the winged death
+- Gifts (`totem::gift`, from the trigger's targets; a thing a trigger targets is created when it fires, not at
+  level load, pop3-rev-analysis.md "Fog of war" "Totems and other level hooks"): a spell (`Reward::Spell`, a "once"
+  discovery `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building discovery, mana
+  (`Reward::Mana`), a fog area (`Reward::RevealFog`, effect 81); an effect a spell makes too (`Reward::Cast`:
+  `GameMap::release` for the tribe, no shaman, mana or range needed, at the effect's place - 12 ghost army, 13
+  invisibility, 15 volcano, 16 hypnotism, 17 lightning bolt at its stored target, 18 swamp, 19 angel of death, 20
+  whirlwind, 21 insect plague, 22 firestorm, 23 erosion and 31 flatten on the nearest height point, 24 land bridge
+  from its cell to its stored target cell, 26 earthquake, 30 lightning, 73 convert wild, 86 armageddon); effect 88
+  teleport (`Reward::Teleport`: the tribe's shaman teleports there); a stone head or a trigger (`Reward::WakeTotem`:
+  the totem on that cell starts `dormant` - hidden, not hoverable, nobody may pray at it - and rises: levels 10
+  and 20 chain their heads so); a person, a finished building or a vehicle (`Reward::Person`, `PlaceBuilding`,
+  `Vehicle`: not placed at load; the thing's owner, or the tribe the gift goes to with `CreatePlayerOwned`; a
+  building placed without levelling its ground, ours). Anything else is `Reward::Unhandled { kind, model }`,
+  only logged: effects 5, 39, 91, 92 (meaning not in the docs), 89/90 (atlantis, TODO.md), and the Angel of
+  Death a type 5 trigger brings. The Worship sandbox's totems give one cast of a spell, mana, or (the winged death
   totem) an unhandled effect (`map::sandbox_gift`). Dev: `BRAVES=totem:N`.
 - Loaded (done: `totem::totems_from_level`): every scenery 9 of a level becomes a `Totem` with `prayers`
   (`TriggerCount`), `shaman_only` (types 3 and 5), `summons_angel` (type 5) and `pray_time` from the prayer trigger on
@@ -109,8 +120,11 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
 - Its reward is not drawn: the player does not know what it gives before it is granted [player].
 - Tooltip (tooltips.md, done but for the bar and the filled places): its name, a people row of `TriggerCount`
   places, brave shapes or the shaman's for shaman-only totems, filled by the counted prayers (the others assigned
-  do not show), and the prayer bar. Rewards: spells
-  for one use, mana, effects, a vehicle, revealed scenery and triggers (level-format.md) [files].
+  do not show), and the prayer bar. It never names the reward: what a totem gives is a surprise until granted
+  [player]; only a pyramid's tooltip names it. Same rule as the icon: the original gives a floating reward icon
+  only to permanent discoveries, i.e. the pyramids' (pop3-rev-analysis.md "The reward icon over a vault") [exe];
+  whether the tooltip reads that same marker is not traced. What totems can give: spells for one use, mana,
+  effects, a vehicle, revealed scenery and triggers (level-format.md) [files].
 - `NumOccurences` (0-4) is probably how many times it can be prayed at; 0 unlimited? [files, meaning unverified]
 
 ## Pyramids of knowledge (vaults)
@@ -161,8 +175,11 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   does not rebuild the building views (`buildings::same_look`). Dev: `VAULT=progress:N|granted:T|spent`.
 - Tooltip (tooltips.md): the name of its reward, a people row of one shaman slot, and the prayer bar of the
   player's tribe.
-- What it gives is drawn: an icon at its top, from the cursor icons (sprites.md: 38-57 spells, 58-65 buildings)
-  [player]. The icon goes away once the reward is granted [player].
+- What it gives is drawn: an icon at its top [player], with a glow (pop3-rev-analysis.md "The reward icon over a
+  vault"): the panel's glyph of the reward (`hfx0-0.dat` 1056-1083, not the cursor icons), a fixed billboard 1072
+  above the vault's ground, an animated glow 80 below it (`hfx0-0.dat` 1417-1432) and a ground light [exe,
+  measured]. They go when the vault fires, as she reaches the middle, not 82 turns later when the reward lands
+  [exe]. Only permanent rewards have one, so totems show none [exe]. Not drawn by us yet.
 
 ## Open
 - `PrayTime`'s unit for a **vault** is confirmed (pop3-rev-analysis.md "The vault"): the same 4-turn tick as a

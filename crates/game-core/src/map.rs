@@ -270,8 +270,10 @@ impl GameMap {
     /// Wildmen around a site that is not built at the start (`ReincarnationSite::welcomes`) are that tribe's
     /// first followers: they start as its braves. Around an animated site they stay wildmen until its levelling
     /// reaches them (`GameMap::convert_in_levelling`).
+    /// Those a trigger creates (`totem::targeted`) wait for it.
     fn with_people(mut self, level: &Level) -> Self {
-        let people = level.things.iter().filter(|t| t.kind == pop3_format::level::KIND_PERSON && !t.is_shaman());
+        let targeted = crate::totem::targeted(level);
+        let people = level.things.iter().filter(|t| t.kind == pop3_format::level::KIND_PERSON && !t.is_shaman() && !targeted.contains(&t.slot));
         for t in people {
             let Some(kind) = UnitKind::from_person_model(t.model) else { continue };
             let cell = ((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32);
@@ -923,7 +925,7 @@ impl GameMap {
         self.marker_cell(index).map(|(x, z)| (x as u16 * WORLD_UNITS_PER_CELL as u16, z as u16 * WORLD_UNITS_PER_CELL as u16))
     }
 
-    fn shaman_mut(&mut self, owner: TribeId) -> Option<&mut Unit> {
+    pub(crate) fn shaman_mut(&mut self, owner: TribeId) -> Option<&mut Unit> {
         self.units.iter_mut().find(|u| u.owner == owner && u.kind == UnitKind::Shaman && !u.statuses.ghost)
     }
 
@@ -1133,7 +1135,7 @@ impl GameMap {
 
     /// `spell` cast by `player` takes effect now: its effect starts (ticking from the next turn), or the terrain
     /// brush applies (the region it changed).
-    fn release(&mut self, player: TribeId, spell: Spell) -> Option<DirtyRect> {
+    pub(crate) fn release(&mut self, player: TribeId, spell: Spell) -> Option<DirtyRect> {
         match spell {
             Spell::Blast { at } => {
                 let from = self.shaman_of(player).map(|u| (u.x, u.z, self.altitude(u) as i32));
@@ -1598,7 +1600,7 @@ impl GameMap {
         self.tend_campfires();
         if !frozen {
             self.tend_vaults();
-            self.tend_totems();
+            dirty.extend(self.tend_totems());
             self.tend_queues();
             self.tend_training();
             self.tend_vehicle_huts();

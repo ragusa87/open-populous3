@@ -321,7 +321,7 @@ mod tests {
             let level = level_with(&[thing(EFFECT_REVEAL_FOG, KIND_EFFECT, (40, 40)), trigger, thing(EFFECT_REVEAL_FOG, KIND_EFFECT, (90, 20))]);
             assert_eq!(fog_areas(&level, false), vec![(40, 40)]);
             assert_eq!(fog_areas(&level, true), vec![(90, 20)]);
-            assert_eq!(crate::totem::gift(&level.things[2]), crate::building::Reward::RevealFog { cell: (90, 20) });
+            assert_eq!(crate::totem::gift(&level.things[2], false), crate::building::Reward::RevealFog { cell: (90, 20) });
         }
 
         #[test]

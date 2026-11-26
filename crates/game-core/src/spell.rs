@@ -7,7 +7,7 @@ use crate::terrain::{DirtyRect, Heightmap};
 
 pub type Cell = (i32, i32);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Spell {
     LandBridge { from: Cell, to: Cell },
     /// Level the ground around the height point `at` to its height (`flatten`); `cast`: the editor's instant brush.

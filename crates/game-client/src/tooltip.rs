@@ -213,6 +213,12 @@ fn reward_name(reward: Reward) -> String {
         Reward::OneShot(kind) => format!("{} (one cast)", kind.name()),
         Reward::Mana(n) => format!("{n} mana"),
         Reward::RevealFog { .. } => "Unexplored land revealed".to_string(),
+        Reward::Cast(spell) => spell.kind().map_or_else(|| "A spell's effect".to_string(), |k| k.name().to_string()),
+        Reward::Teleport { .. } => "The shaman moved".to_string(),
+        Reward::WakeTotem { .. } => "A totem risen".to_string(),
+        Reward::Person { .. } => "A person".to_string(),
+        Reward::PlaceBuilding { kind, .. } => kind.name().to_string(),
+        Reward::Vehicle { .. } => "A vehicle".to_string(),
         Reward::Unhandled { .. } => "Something unknown".to_string(),
     }
 }
