@@ -1,7 +1,8 @@
 //! The reward icon over a pyramid of knowledge (pop3-rev-analysis.md "The reward icon over a vault"): the panel's
 //! glyph of what it teaches (`hfx0-0.dat`, `icon_sprite`) as a fixed camera-facing billboard over the vault, and
-//! under it, 80 lower, an animated glow (hfx 1417-1432). The original's stands 1072 over the ground, inside our
-//! pyramid (1746 high): ours stands `OVER_TOP` above the pyramid's own top instead, 1072 without the model. Both go as the pyramid's top
+//! under it, 80 lower, an animated glow (hfx 1417-1432), 1072 terrain height units (4.19 cells) over the ground,
+//! just over the apex of the pyramid drawn at its own scale (pop3-rev-analysis.md "Model size"), over the middle of
+//! its head. Both go as the pyramid's top
 //! starts closing over the reward given (the player's choice: the original's go on the turn the vault fires, its
 //! gauge full). Without the original files, the generated spell glyph where there is one, no glow.
 //! Ours: the glow's sprite per moment (one round of its 16 sprites every `GLOW_LOOP`), no ground light.
@@ -27,10 +28,10 @@ use pop3_format::{Picture, SpriteBank, Theme, WORLD_UNITS_PER_CELL};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// The original's icon height over the vault's ground, the icon over the pyramid's top (ours) and the glow under
-/// the icon (object units, drawn as the building is: 512 a cell times the Buildings scale).
+/// The icon over the vault's ground and the glow under the icon, terrain height units (256 a cell), times the
+/// Buildings scale as the pyramid is.
 const ICON_HEIGHT: f32 = 1072.0;
-const OVER_TOP: f32 = 160.0;
+const HEIGHT_UNITS_PER_CELL: f32 = 256.0;
 const GLOW_BELOW: f32 = 80.0;
 const GLOW_SPRITES: std::ops::RangeInclusive<usize> = 1417..=1432;
 const GLOW_LOOP: Ticks = Ticks::millis(500);
@@ -63,13 +64,8 @@ pub fn icon_sprite(reward: Reward) -> Option<usize> {
     }
 }
 
-/// How high the icon stands over the ground (object units): above `pyramid`'s top, or the original's height without it.
-pub fn icon_height(pyramid: Option<&pop3_format::Object>) -> f32 {
-    pyramid.and_then(|o| o.points.iter().map(|p| p[1]).max()).map_or(ICON_HEIGHT, |top| top as f32 + OVER_TOP)
-}
-
-/// The middle of `pyramid`'s head (object units, x and z in its own frame): the mean of its points in the top
-/// quarter of its height, the petals round its open top; the model's origin without it.
+/// The middle of `pyramid`'s head (cells, x and z in its own frame, at its own scale): the mean of its points in the
+/// top quarter of its height, the petals round its open top; the model's origin without it.
 pub fn head_centre(pyramid: Option<&pop3_format::Object>) -> (f32, f32) {
     let Some(o) = pyramid else { return (0.0, 0.0) };
     let top = o.points.iter().map(|p| p[1]).max().unwrap_or(0) as f32;
@@ -78,7 +74,8 @@ pub fn head_centre(pyramid: Option<&pop3_format::Object>) -> (f32, f32) {
         return (0.0, 0.0);
     }
     let n = head.len() as f32;
-    (head.iter().map(|p| p[0] as f32).sum::<f32>() / n, head.iter().map(|p| p[2] as f32).sum::<f32>() / n)
+    let unit = o.cells_per_unit();
+    (head.iter().map(|p| p[0] as f32).sum::<f32>() / n * unit, head.iter().map(|p| p[2] as f32).sum::<f32>() / n * unit)
 }
 
 /// Every sprite `icon_sprite` may name.
@@ -184,12 +181,13 @@ impl WorldView for VaultIconView {
         let (x, z) = b.centre();
         let ground = render_pos(&map.0.terrain, &Grounded { at: Vec2::new(x as f32, z as f32) / cell, half: 0.0 }, rig.focus, &params.0);
         let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
-        let scale = objects.get(crate::object_scale::ObjectGroup::Buildings) / cell;
+        let group = objects.get(crate::object_scale::ObjectGroup::Buildings);
+        let scale = group / HEIGHT_UNITS_PER_CELL;
         let glow = (!assets.glow.is_empty()).then(|| &assets.glow[glow_frame(now.secs_since(game_core::time::Tick::ZERO), assets.glow.len())]);
         let pyramid = models.0.as_ref().and_then(|bank| bank.get(pop3_format::catalog::KNOWLEDGE_PYRAMID));
-        let height = icon_height(pyramid);
+        let height = ICON_HEIGHT;
         let (hx, hz) = head_centre(pyramid);
-        let head = Quat::from(crate::buildings::facing_yaw(b.facing)) * Vec3::from(crate::game_frame::GamePos(Vec3::new(hx, 0.0, hz) * scale));
+        let head = Quat::from(crate::buildings::facing_yaw(b.facing)) * Vec3::from(crate::game_frame::GamePos(Vec3::new(hx, 0.0, hz) * group));
         for (part, lift, frame) in [(self.icon, height, None), (self.glow, height - GLOW_BELOW, glow)] {
             let Ok((mut t, mut vis, mut mesh, mut mat)) = parts.get_mut(part) else { continue };
             match ground {
@@ -249,7 +247,7 @@ mod tests {
     fn the_head_centre_is_the_middle_of_the_top_points() {
         let points = vec![[-100, 0, -100], [100, 0, 100], [40, 1000, 60], [60, 1000, 100], [50, 800, 80]];
         let o = pop3_format::Object { points, ..Default::default() };
-        assert_eq!(head_centre(Some(&o)), (50.0, 80.0), "the base points left out");
+        assert_eq!(head_centre(Some(&o)), (50.0 / 512.0, 80.0 / 512.0), "the base points left out, in cells");
         assert_eq!(head_centre(None), (0.0, 0.0));
     }
 

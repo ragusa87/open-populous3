@@ -180,9 +180,9 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   above the vault's ground, an animated glow 80 below it (`hfx0-0.dat` 1417-1432) and a ground light [exe,
   measured]. They go when the vault fires, as she reaches the middle, not 82 turns later when the reward lands
   [exe]. Only permanent rewards have one, so totems show none [exe]. Drawn (client `vault_icon.rs`): the glyph
-  and the looping glow, but 160 above the top of our pyramid model (1746 high: 1072 is inside it; the original's
-  1072 without the model), and kept until the top starts closing over the given reward (the player's choice,
-  not on firing); no ground light; without the original files, the generated spell glyph and no glow. The
+  and the looping glow at the original's 1072 terrain units (4.19 cells), just over the apex of the pyramid drawn
+  at its own scale (pop3-rev-analysis.md "Model size"), over the middle of its head; kept until the top starts
+  closing over the given reward (the player's choice, not on firing); no ground light; without the original files, the generated spell glyph and no glow. The
   Buildings sandbox's pyramid teaches Swarm, to show it.
 - Granted to the player: a cinematic carries the reward from the vault to its panel button, a building's model in
   pieces or a spell's glyph, and the reward only counts once it arrives (pop3-rev-analysis.md "Discovery
