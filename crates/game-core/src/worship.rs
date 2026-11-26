@@ -134,10 +134,6 @@ impl GameMap {
                 }
             }
         }
-        // By the time a totem sinks (`is_gone`, well after `is_exhausted`), its queue was already
-        // emptied and every assigned unit sent `Order::Stop` above: no `Action::Worshipping { at:
-        // WorshipAt::Totem { id } }` can still be pointing at it, so it is safe to drop here.
-        self.totems.retain(|t| !t.is_gone());
     }
 
     /// Unit `i` is locked (`Unit::locked`: tumbling or lifted) or inside a vault (walking in, at its
@@ -439,7 +435,9 @@ mod tests {
         assert_eq!(map.totem_at((x, z)), Some(first), "still there while it turns and sinks");
         map.run(crate::totem::TURN_TICKS + crate::totem::HOLD_TICKS + crate::totem::SINK_TICKS);
         assert_eq!(map.totem_at((x, z)), None, "sunk: gone");
-        assert!(map.totems.iter().all(|t| t.id != gone_id), "dropped from `totems`, not just flagged `is_gone`");
+        assert!(map.totems[first].id == gone_id && map.totems[first].is_gone(), "kept, flagged `is_gone`: the totems' indices stay put");
+        map.run(crate::time::Ticks::secs(60));
+        assert!(map.totems[first].is_gone(), "sunk for good");
     }
 
     /// worship.md: level 23 has two totems sharing one cell, point for point. Before a totem carried a

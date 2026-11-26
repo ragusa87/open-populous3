@@ -308,7 +308,7 @@ pub fn exists(map: &GameMap, target: Target) -> bool {
     match target {
         Target::Building(i) => i < map.buildings.len(),
         Target::Tree(i) => i < map.trees.len(),
-        Target::Totem(i) => i < map.totems.len(),
+        Target::Totem(i) => map.totems.get(i).is_some_and(|t| !t.is_gone()),
         Target::Vehicle(id) => map.vehicle(id).is_some(),
         Target::Swamp(id) => map.effects.contains(id),
     }

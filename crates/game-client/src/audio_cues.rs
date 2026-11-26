@@ -158,7 +158,7 @@ pub fn nods(secs: f32) -> u32 {
 fn stone_head_sounds(map: Res<CurrentMap>, now: Res<crate::sim_time::SimNow>, mut before: Local<Option<u32>>, mut sounds: MessageWriter<PlaySound>) {
     let count = nods(now.secs_since(Tick::ZERO));
     if before.replace(count).is_some_and(|b| b != count) {
-        let heads = map.0.totems.iter().filter(|t| t.kind == game_core::totem::TotemKind::StoneHead);
+        let heads = map.0.totems.iter().filter(|t| t.kind == game_core::totem::TotemKind::StoneHead && !t.is_gone());
         let cell = pop3_format::WORLD_UNITS_PER_CELL as f32;
         sounds.write_batch(heads.map(|t| PlaySound::at(SoundCue::StoneHeadNod, Vec2::new(t.x as f32, t.z as f32) / cell)));
     }

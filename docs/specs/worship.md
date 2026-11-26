@@ -64,8 +64,10 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
     of the rings (2 or 3, over a longer time); spinning fast and slowing down into place; overshooting 64° and
     springing back; a ratchet of short clicks (4 × 16°) with pauses; a rumble (the totem shaking) while it sinks.
   Done: the timeline is in the simulation (`Totem::since_given`; `TURN_TICKS` 2 s, `HOLD_TICKS` 1 s, `SINK_TICKS`
-  4 s; `Totem::is_gone`, then it is dropped from `GameMap::totems` outright, `GameMap::tend_totems`'s own
-  `retain` - not just unfindable through `GameMap::totem_at`, actually gone); the client poses the rings from objects 1
+  4 s; `Totem::is_gone`: sunk for good. It stays in `GameMap::totems`, so the indices views, hover and tooltips
+  hold stay put, but nothing finds it any more: `totem_at`, orders, placement, vehicles, tooltips and the stone
+  heads' nod all skip it. Dropping it from the list instead made a sunk head reappear: its view then posed
+  another totem, or a stale one); the client poses the rings from objects 1
   and 3 (`totems::twisted`, `turn_fraction`, eased and smoothed between ticks), lowers the body
   (`sink_fraction`) with puffs of smoke (`effects::SINKING`) and hides it once gone. The generated stack of blocks turns its
   blocks above the base by the same amount.
