@@ -262,7 +262,7 @@ pub enum Action {
     AroundFire { fire: (u16, u16), point: u8 },
     /// A wildman eating beside a tree, or (`drink`) drinking at the shore (pop3-rev-analysis.md "Wildmen"), `left`
     /// ticks before it wanders off again.
-    Grazing { drink: bool, left: Countdown },
+    Grazing { drink: bool, at: (u16, u16), left: Countdown },
     /// A brave cutting one piece of wood off the tree at `tree` (its position), `left` ticks to go.
     Chopping { tree: (u16, u16), left: Countdown },
     /// A brave picking up the piece of wood at `at` (its position), `left` ticks to go: the original's same
@@ -571,8 +571,8 @@ pub struct Unit {
     spell: Option<Spell>,
     /// The camp fire (centre) and ring point she is walking to, to go round it once there.
     to_fire: Option<((u16, u16), u8)>,
-    /// A wildman's own walk to eat (`false`) or drink (`true`) once there (`wildman::tend_wildmen`).
-    to_graze: Option<bool>,
+    /// A wildman's own walk to eat or drink once there (`wildman::tend_wildmen`).
+    to_graze: Option<crate::wildman::GrazeWalk>,
     /// A wildman looks for a tree again from this tick (`wildman::tree_rest`).
     pub(crate) tree_rest_until: Tick,
     /// The tree (position) she is walking to, to cut it once there.
@@ -903,11 +903,38 @@ impl Unit {
 
     /// A wildman's own walk to `at`, then eats (`drink` false) or drinks (`drink` true) there
     /// (`wildman::tend_wildmen`).
-    pub fn go_graze(&mut self, at: (u16, u16), drink: bool) {
-        self.start(Order::MoveTo { x: at.0, z: at.1 });
+    pub fn go_graze(&mut self, walk: crate::wildman::GrazeWalk) {
+        self.start(Order::MoveTo { x: walk.at.0, z: walk.at.1 });
         if self.action.can_take_orders() {
-            self.to_graze = Some(drink);
+            self.to_graze = Some(walk);
         }
+    }
+
+    /// The walk to eat or drink it is on, if any.
+    pub(crate) fn graze_walk(&self) -> Option<crate::wildman::GrazeWalk> {
+        self.to_graze.filter(|_| matches!(self.action, Action::Walking { .. } | Action::Stranded { .. }))
+    }
+
+    /// Ends its walk to eat or drink there: it starts on the meal (`wildman::meal_ticks`, the tree rest from now)
+    /// or the drink, facing what it eats.
+    pub(crate) fn start_grazing(&mut self, now: Tick) {
+        let Some(walk) = self.to_graze.take() else { return };
+        let length = if walk.drink { crate::wildman::GRAZE_TICKS } else { crate::wildman::meal_ticks(self.id, now) };
+        if !walk.drink {
+            self.tree_rest_until = now + crate::wildman::tree_rest(self.id, now);
+        }
+        let (dx, dz) = (torus_delta(self.x, walk.at.0), torus_delta(self.z, walk.at.1));
+        if (dx, dz) != (0, 0) {
+            self.facing = octant(dx, dz);
+        }
+        (self.route, self.planned_on) = (Vec::new(), None);
+        self.action = Action::Grazing { drink: walk.drink, at: walk.at, left: Countdown::new(length) };
+    }
+
+    /// Gives up its walk to eat or drink, or its meal.
+    pub(crate) fn stop_grazing(&mut self) {
+        self.to_graze = None;
+        self.go_idle();
     }
 
     /// Walks to `door`, then goes into the building `building` (id, `UnitEvent::AtDoor`).
@@ -1170,20 +1197,16 @@ impl Unit {
                             self.action = Action::Worshipping { at };
                         } else if let Some(vehicle) = self.to_vehicle.take() {
                             return Some(UnitEvent::AtVehicle { vehicle });
-                        } else if let Some(drink) = self.to_graze.take() {
-                            let length = if drink { crate::wildman::GRAZE_TICKS } else { crate::wildman::meal_ticks(self.id, now) };
-                            if !drink {
-                                self.tree_rest_until = now + crate::wildman::tree_rest(self.id, now);
-                            }
-                            self.action = Action::Grazing { drink, left: Countdown::new(length) };
+                        } else if self.to_graze.is_some() {
+                            self.start_grazing(now);
                         }
                     }
                 } else if self.hurt(now) {
                     return Some(UnitEvent::Died);
                 }
             }
-            Action::Grazing { drink, mut left } => {
-                self.action = if left.tick() { Action::Idle } else { Action::Grazing { drink, left } };
+            Action::Grazing { drink, at, mut left } => {
+                self.action = if left.tick() { Action::Idle } else { Action::Grazing { drink, at, left } };
             }
             Action::Holding { mut left } => {
                 if left.tick() {

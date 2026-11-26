@@ -90,8 +90,10 @@ standing in for the original's own untranslated coastal-shape table - **both `[o
 `wildman::meal_ticks` (50-99 turns, 4.2-8.3 s) and looks for a tree again only `wildman::tree_rest` (128-252
 turns, 10.7-21 s) after arriving (pop3-rev-analysis.md "Eating at a tree"); while that rest runs it stays idle
 (`[ours]`: whether the shore search runs then is not traced). At the shore it lingers `wildman::GRAZE_TICKS` (a
-guess) before going idle and searching again. The walk to the tree is never given up (the original's after 128
-turns: not done). No
+guess) before going idle and searching again. It arrives within 120 units of its tree on both axes and eats facing
+it; it gives the walk up after 128 turns (`TREE_WALK_TICKS`) or once the tree is gone, and stops eating once the
+tree is gone (the original first looks in its cell for someone to "notice", state 34: not done). The walk to the
+shore is given up once its spot is no longer shore (state 6's own timer is not pinned: none here). No
 hunger or thirst stat exists anywhere, confirmed absent: both searches only ever pick where an idle animation
 plays, nothing is consumed. A wildman idling at its shore spot genuinely drowns fairly often - no special
 mechanic, just the ordinary per-turn drowning check re-testing the exact fine-grained spot every turn with no

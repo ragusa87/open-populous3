@@ -1228,7 +1228,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
 | 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
 | 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); a random number of fireballs (about 31 small and 9 big on average) thrown ballistically 3-10 cells out, landing in simple blasts ("Volcano fireballs") and 26 decorative rocks ("Volcano rocks"). |
-| 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman within 2 cells becomes a brave of the caster (if the tribe is under 200); ends 18 turns after the last conversion. |
+| 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman on an all-land cell in the 5 × 5 cells around the cast cell (7 × 7 for a computer caster) becomes a brave of the caster (if the tribe is under 200); wildmen on coast cells there step inland instead. Life 18 turns (22 computer), reset to 18 by each conversion. A scatter of gold sparkles on a 2.5-cell-radius circle, 4 a turn, 4-7 turns each. See "Convert wild". |
 | 18 | Armageddon (hidden) | Clears the map, turns every building into one person, gathers every tribe on an arena around the target and makes them fight; the weakest shaman is struck by blast or lightning at intervals; anyone more than 9 cells away dies. |
 | 19 | Shield (60 000, 4096, 4) | The `SHIELD_NUM_PEOPLE` (file 6) nearest own followers (not shaman, wildmen, angels, ghosts) for 120 s: immune to blast and whirlwind, other damage ignored too, except melee; deflects burn, blast, lightning, whirlwind and insect shots. |
 | 20 | Bloodlust (hidden) | 6 nearest own followers for `BLOODLUST_COUNT_X8` × 8 turns (file 120 s): melee and firewarrior damage × `BLOODLUST_DAMAGE_X` (3), damage taken >> `BLOODLUST_HEALTH_X` (3, i.e. / 8), firewarrior reload >> `BLOODLUST_SW_BLAST_X`. |
@@ -1236,6 +1236,59 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 
 Friendly fire: lightning, whirlwind, swamp, volcano and lava hurt the caster's own people; blast, firestorm and
 insects do not damage allies. Lightning and swamp kill regardless of health.
+
+### Convert wild [exe, measured]
+One effect (7/0x49, effect state 60, `pop3-rev/docs/effect_states.csv`) at the target point, with its own life
+counter `+0x6C`. It never moves; conversions and sparkles are both centred on the cast cell, not the exact point.
+
+```text
+init (0x5122E0):  life = 22 if the caster's tribe is computer-controlled (tribe+0xC1F == 1), else 18
+                  sound 0xB4 ("Conv_bg") once
+every turn (0x512350):
+  if life > 0: life -= 1
+  if tribe population (tribe+0x91D) < 200 and (effect's own turn counter & 7) == 0:     # every 8 turns
+      r = 3 if computer-controlled else 2
+      scan the (2r+1) x (2r+1) whole cells around the cast cell (5 x 5 human, 7 x 7 computer):
+        every wildman (person type 1) there:
+          its cell is not all land (coast shape != 0, i.e. shore or sea):
+              not a candidate; forced into person state 8 sub-state 3 ("step inland and wait", below)
+          else: candidate, keep the nearest to the effect (0x450450)
+      nearest candidate found:
+          tribe in "give up and sulk" (tribe+0x941 bit 0x40): life = 0           # ends, no conversion
+          else: life = 18; replace the wildman by a brave of the caster's tribe (0x4D7FD0)
+  if life > 0:
+      4 sparkles (7/0x3C), each at a random angle (rand & 2047), 1280 from the centre of the cast cell,
+      snapped to the ground there then lowered by 24, life 4 + (rand & 3) = 4..7 turns
+  else: delete the effect
+```
+
+- Duration: 18 turns (1.5 s) for a human caster, 22 (1.8 s) for a computer one, but every conversion resets it to
+  18, so it lasts as long as there is a wildman to convert every 8 turns, then 18 turns more. With nobody in reach
+  it gets 2 or 3 tries. The population cap only skips the try (life still runs down).
+- Reach: a square, not a circle: 2 whole cells around the cast cell for a human (edges 2.5 cells out on each
+  axis, about 3.5 cells at the corners), 3 for the computer. Measured: conversions at (−2.91, +0.11),
+  (+2.78, +2.02) and (+2.93, −2.20) cells from a computer's cast.
+- The new brave is a new unit (new id) in person state 10 for one turn, then idle (state 19), with the conversion
+  flash and chime of 0x4D7FD0 (as in "Levelling"). The wildman's current activity does not matter: one eating at
+  a tree (person state 15) was converted.
+- Wildmen are not attracted: none walks towards the spell (measured). The only movement it causes is on wildmen
+  standing on a coast or sea cell inside the square: they are not converted that try but put into person state 8
+  sub-state 3 (0x4D6523): for 64 turns, every 4 turns, while their cell is not all land they turn to the cell's
+  coast direction + 180° (0x465580, the shape's direction byte + 4, of 8) and walk; once on land they stop and
+  play the idle animation, their tree/shore wander timers held at 16, so they stand still to be converted on a
+  later try. Measured: a wildman found in 8/3 was converted 7 turns later on the same spot.
+
+Look: the "ring" is a scatter of short-lived sparkles on one circle of radius 1280 (2.5 cells, diameter 5 cells)
+around the cast cell's centre, 4 new ones a turn at random angles, about 22 alive at once (measured 21-24). They
+are the same 7/0x3C gold four-point twinkle as the levelling's (hfx 1288-1303, camera-facing billboard,
+animation 0x508, one frame per drawn frame, see "Levelling"), but standalone: they do not move, orbit or drop
+small sparkles; each twinkles in place for 4-7 turns and vanishes. They follow the ground (24 below the terrain
+at their own point; −24 over the sea). For a human caster the circle is the one inscribed in the 5 × 5 cell
+square that is actually scanned; the computer's 7 × 7 square reaches beyond it.
+
+Measured on level 17 (three AI casts, `pop3-rev/mesurements/convert_level17.log`, `scripts/watch_convert.py`):
+life 22 at birth, conversions on turns where the effect's counter is a multiple of 8 (life back to 18 each time),
+deletion exactly 18 turns after the last one; every sparkle born 1279-1281 from the cell centre, living 4-7 turns.
 
 ### Volcano rocks [exe]
 Purely decorative: the volcano's per-turn function (0x50E060) makes one scenery 13 ("rock", `create_unit(5, 13)`
@@ -6425,7 +6478,8 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   is actually consumed at either stop, it only decides where the idle animation plays.
   Eating at a tree ("Eating at a tree"): ours follows the 12-cell radius, the 50-99 turn meal, the 128-252 turn
   rest before the next tree search and the eat sound back to back (one tick is one turn; an earlier note here
-  gave "42-83 ticks", which was wrong); it does not give up the walk after 128 turns.
+  gave "42-83 ticks", which was wrong), giving up the walk after 128 turns or once the tree is gone, and the meal
+  once the tree is gone (without the state 34 look first).
   `attack.rs`'s `wildmen_never_fight_and_nobody_attacks_its_own` test makes wildmen entirely unattackable; the
   original only confirms the *automatic* proximity scan skips them (tribe 0xFF is never treated as an enemy) -
   whether an explicit player attack order also respects that filter is still open, so our blanket rule may be

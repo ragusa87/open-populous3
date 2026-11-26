@@ -570,7 +570,7 @@ mod tests {
         u.action = Action::Hammering;
         let beats = (0..WORK_EVERY * 2).filter(|&t| turn_cue(&u, Tick::from_wire(t), 0).is_some()).count();
         assert_eq!(beats, 2);
-        u.action = Action::Grazing { drink: false, left: game_core::time::Countdown::new(game_core::time::Ticks::new(99)) };
+        u.action = Action::Grazing { drink: false, at: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(99)) };
         assert!((0..4).all(|t| turn_cue(&u, Tick::from_wire(t), 0).is_some()), "eating back to back");
         u.action = Action::OnFire { away: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(5)) };
         assert!((0..4).all(|t| turn_cue(&u, Tick::from_wire(t), 0) == Some(SoundCue::OnFire)));

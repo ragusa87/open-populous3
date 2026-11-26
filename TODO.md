@@ -284,8 +284,11 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   untranslated coastal-shape table, also `[ours]`. `wildman::SEEK_EVERY` (how often it looks) and `GRAZE_TICKS`
   (how long it drinks) are both guesses. The meal (50-99 turns), the rest before the next tree search (128-252
   turns from arriving) and the 12-cell radius follow pop3-rev-analysis.md "Eating at a tree" (one tick is one
-  turn). Left: giving up the walk to the tree after 128 turns; whether the shore search runs during the rest
-  (ours: no). Drowning at the shore needs no code
+  turn), as do giving up the walk (128 turns, or the tree gone) and the meal (the tree gone). Left: whether the
+  shore search runs during the rest (ours: no) and the shore's own cooldown `+0x7C` (rerolled by 0x4D4870 on
+  arriving, its numbers untraced - **question for a spec session**); state 6's walk timer and state 16's
+  drinking length (`GRAZE_TICKS` stands in); state 34 ("noticing" a person, a head or a vehicle nearby).
+  Drowning at the shore needs no code
   of its own, confirmed to fall out of the generic per-turn check already. Still open, unrelated to the loop
   itself: the literal VSTART id each state resolves to was already known and is now wired (eat=2, drink=4); a
   wildman's death spirit-rise variant (see the death/spirit item below); whether an explicit attack order is
