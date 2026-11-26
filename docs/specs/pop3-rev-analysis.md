@@ -176,6 +176,10 @@ so a live measurement may run on it with the addresses translated.
   wildman in a 5 × 5 cell square (7 × 7 for the computer) becomes a brave and the effect's life goes back to 18
   turns; it never draws wildmen in. Its ring is 4 random sparkles a turn on a circle of radius 2.5 cells, each
   twinkling 4-7 turns. See "Convert wild".
+- **A vault's icon is its own thing, not part of the building** [exe, measured on level 1]: at level load every
+  permanent discovery gets a "discovery marker" showing the reward's panel glyph (hfx 1056-1083) as a fixed
+  billboard 1072 units over the vault's ground, with an animated glow (hfx 1417, white core, cycling colour
+  fringe) 80 below it and a ground light. Both go the turn the vault fires. See "The reward icon over a vault".
 
 ## Turns and timing [exe]
 ```text
@@ -763,6 +767,75 @@ for vaults specifically.
   only applies to filling), and this vault is confirmed to run the same shared code with no vault-specific math
   - so a vault drains at the same `C²`-per-step rate as a full-staffed fill, same as any totem, without needing
   a separate live trial.
+
+### The reward icon over a vault [exe, measured on level 1]
+The icon floating over a pyramid of knowledge is not drawn by the building. It is a separate thing, the
+**discovery marker** (class 6 type 10), with a second thing under it for the **glow** (class 6 type 8).
+
+Where the markers come from (level load, 0x485C82):
+```text
+for each discovery (class 6 type 2) in the level file:
+    copy kind (+0x7C: 2 building, 6 mana, 11 spell), reward index (+0x74), availability (+0x80)
+    if availability == 1 (permanent) and the game mode byte is not 3:
+        create a marker (class 6 type 10) at the discovery's position, with the same kind and reward index
+```
+The discovery itself stays dormant (state 0, never processed) until its trigger fires; only the marker shows.
+In the campaign, permanent discoveries are exactly the vaults' rewards (level-format.md "Vault of knowledge"),
+so every vault, and only vaults, gets an icon. Totem rewards (`Once`) get none, which matches the player's
+report that a totem's tooltip does not name its reward either (only a pyramid's does); whether the tooltip reads
+the marker is not traced.
+
+Marker, first turn of its state 8 (0x4FC570; it redoes this when the thing is moved):
+```text
+sprite = icon of (kind, reward)                     # table below; draw class 0 = a plain hfx billboard,
+                                                    # one fixed frame, no animation
+show it (clears drawable flags 0x10 and 0x80 at +0x35, sets 0x8000)
+thing on its cell:
+    a vault (building 18)  -> position = the vault's slot-1 point (0x404540), height = ground there + slot offset
+    a class-9 shape        -> its point (0x4B9FC0); anything else -> its door point (0x4044B0)
+    nothing                -> its own position, height = ground + 800
+glow = new class 6 type 8 at the same place, tribe 255:
+    draw class 0x2B, sprite hfx 1417 (an animated billboard), +0x14 |= 0x400, +0x3B = 1
+    a dynamic ground light on it (0x4010B0 with 4, 4, 0; a shot uses 2, 4, 0)
+glow height = marker height - 80                    # kept every turn while the marker lives
+```
+Neither moves afterwards: the icon does not bob or turn. The glow's own per-turn (state 9, 0x4F1530) does nothing
+here (it only follows a parent linked at +0xA4, which is 0).
+
+| Reward kind | Icon (hfx0-0.dat) |
+|---|---|
+| spell (11) | spell table +0xE: models 1-17 -> 1057-1073 in order, 18 -> 1056 ("?"), 19 -> 414, 20 -> 415, 21 -> 1074 |
+| mana (6) | 1056, a small "?" |
+| building (2) | building table +0xA: huts 1-3 1075, drum tower 1076, warrior 1077, firewarrior 1078, temple 1079, spy 1080, boat huts 1081, airship huts 1082, guard post 1083, others 1075 |
+
+- The icons are the panel's white spell and building glyphs (sprites.md "1028-1083"), 28 × 25 pixels for a
+  spell, about 22 × 23 for a building, not the cursor's icons (`POINT0-0.DAT`).
+- The glow is a 16-sprite alpha run, hfx 1417-1432 (81 × 68): a white core whose fringe cycles yellow, red, blue,
+  green and back to yellow. Its draw class has animation kind 1: the clock `+0x37` gains 4 per drawn frame (not per
+  turn) and wraps at 4 × 14, so it loops with the frame rate; which of the 16 sprites it shows per clock value is
+  not traced. Seen in the game from far away: a yellow blob high over the vault.
+- Measured (level 1, live): vault at ground 75; its dormant discovery at 875 (ground + 800); the marker at 1147,
+  so the slot-1 offset of a vault is 1072 (2.1 cells above the ground); the glow at 1067; the marker 14 units
+  from the vault's own position (the apex). Level 1's vault teaches building 7 and the marker had sprite 1077.
+
+When the vault is used (trigger fire, 0x4FBA90; static, not seen live):
+```text
+the trigger clones its dormant discovery (new class 6 type 2, state 4, per turn 0x4FACF0) and, as it has a
+driving tribe: clone.tribe = that tribe, countdown +0x7A = 82, hide delay +0x7F = 6, sound 0x70
+if the trigger is used up (NumOccurences reaches 0): its dormant targets are deleted
+    deleting a discovery also deletes the first marker with the same kind and reward index, and its glow
+clone, first turn: the same icon, place and glow as a marker
+clone, after 6 turns: drawable flag 0x10 set; for the player's tribe the discovery cinematic starts
+    (0x481550, see "Reference" 0x482290 / 0x4839F0); its glow is deleted
+clone, after 82 turns (6.8 s): the reward is granted, then the clone is deleted (and any marker left for it)
+```
+- So the marker and its glow go on the turn the vault fires, and a second icon and glow (the clone's) stand in
+  the same place for 6 turns (0.5 s). Whether the clone's icon is really drawn is not settled: it keeps flag 0x80
+  at +0x35, which the marker clears; the renderer tests 0x80 (draw_polygons 0x4697CC) for a different draw path,
+  not traced.
+- A discovery can also be picked up on its own (state 4, every 4 turns): a person of a tribe on its cell whose
+  current order is kind 29 (0x4F62C0) takes it, with the same sound 0x70, a 1-turn hide delay and the 82-turn
+  countdown. A dormant vault discovery never runs this.
 
 ## Reincarnation sites [exe, measured]
 No level file has pillars (scenery 12): the game creates them when the level loads, for each tribe that has a
@@ -6333,6 +6406,11 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   - the linear drain at the full-speed rate matches our guess;
   - the original has one gauge per trigger, driven by the tribe with the most prayers, where ours has one per
     tribe.
+- worship.md "Pyramids of knowledge" (the icon at its top; not drawn by us yet): the original draws the panel's
+  glyph (hfx 1056-1083, table in "The reward icon over a vault"), not the cursor icons; a fixed billboard at the
+  vault's slot-1 point, 1072 above its ground; an animated glow (hfx 1417-1432) 80 below it plus a ground light.
+  It goes when the vault fires (our `Vault::grant`), not when the reward lands 82 turns (6.8 s) later; only
+  permanent discoveries have one.
 
 - Reincarnation sites (game-client `sites.rs`, game-core `site.rs`): ours put 8 stones on a round ring of 1.3
   cells, not turned, and flatten radius 3 (blend 4). The original: the octagon above (3 cells, 2.8 on the
@@ -6696,6 +6774,9 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   (The per-tribe base capacity, tribe+0x921, is resolved - see "Huts: breeding and growth".)
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
+- Vault icon: whether the clone discovery's own icon is drawn during its 6 turns (drawable flag 0x80 at +0x35, kept
+  by the discovery and cleared by the marker), which glow sprite each animation clock value shows (14 steps, 16
+  sprites), what game mode 3 is (no markers), and the ground light's parameters (4, 4, 0).
 
 - Physics: what the grounded landing routine 0x4E9950 does, so whether ordinary falls ever hurt.
 - Blast: whether this spell's own `push_k`/`vert_k`/`R` instance fields (+0x74/+0x78/+0x6c, "Blast push and
@@ -6870,6 +6951,12 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4FA8F0 | `unit_processing_class_6_general` |
 | 0x4FB270 | trigger handler; prayer count at 0x4FB48D, gauge at 0x4FB71F, drain at 0x4FB788 |
 | 0x4FB1D0 | trigger defaults when created without a level record (`TriggerCount` 1, `PrayTime` 192) |
+| 0x485C82 | level loader, discovery record: kind, reward, availability; a marker (6/10) for each permanent one |
+| 0x4FAAF0 | discovery (6/2) init: state 4, icon sprite, position over a vault's slot 1 or ground + 800 |
+| 0x4FACF0 | discovery per turn (state 4): glow, pickup by a person on its cell with order kind 29, hide after +0x7F turns and cinematic, reward after the 82-turn countdown |
+| 0x4FC570 | discovery marker (6/10) per turn (state 8): icon, position, glow (6/8, hfx 1417) 80 below |
+| 0x4FC790 | marker init height offset: vault slot 1 (0x404540), door point, or 800 |
+| 0x4EF26C | delete, class 6: a discovery takes its marker (same kind and reward) and its glow; a marker takes its glow |
 | 0x485D00 | level loader: trigger record fields to the unit |
 | 0x4C14C0 | `init_unit_type_11`: spell unit, mana, cooldown; cast setup 0x4C1B80 |
 | 0x4C1D10 | spell unit per turn: sub-state 3 waits 6 turns, launches the shot (0x4C21E0), sub-state 2 deflects or spawns the effects (0x4C1EA0) |

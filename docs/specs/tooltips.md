@@ -110,7 +110,7 @@ pressed, it sends `Command::Unload`. Without the original files, an "Unload" tex
 | Drum tower | the unit inside | used | | dismantle |
 | Training unit | the trainee | used | training | dismantle |
 | Pyramid of knowledge | the shaman; the name of its reward under its own name | | prayer | |
-| Totem | counted prayers | | prayer | |
+| Totem | counted prayers; never its reward (a surprise) | | prayer | |
 | Vehicle | people aboard | | | unload button |
 | Tree | | current wood | | |
 | Wood piece | name only ("Wood") | | | |
@@ -137,6 +137,7 @@ simulation, one widget.
 
 A pyramid's tooltip names its reward (the spell or building it teaches) [player]; once granted, like the icon
 on its top, not any more [ours].
+A totem's tooltip never names its reward: the player only finds out what it gives when it is granted [player].
 
 ## Icons [ours]
 With the original files a person is its kind's teal figure (`hfx0-0.dat` 75-80, sprites.md, drawn 1:1 in an
