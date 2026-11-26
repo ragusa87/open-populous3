@@ -527,9 +527,10 @@ pub const FX_FADE: f32 = 0.1;
 pub const MUSIC_FADE: f32 = 1.5;
 
 /// What `REPEAT_GAP` holds back: the same sound from the same cell (flat sounds share one). Ours: per cell, so
-/// the same sound from different places (a site's stones landing a turn apart) is not held back.
-pub fn repeat_key(cue: SoundCue, at: Option<Vec2>) -> (SoundCue, Option<(i32, i32)>) {
-    (cue, at.map(|p| (p.x.floor() as i32, p.y.floor() as i32)))
+/// the same sound from different places (a site's stones landing a turn apart) is not held back. A unit's own
+/// sound (eating, burning, work) by its id alone, as the original: a crowd of eaters does not chew all at once.
+pub fn repeat_key(cue: SoundCue, at: Option<Vec2>, owned: bool) -> (SoundCue, Option<(i32, i32)>) {
+    (cue, at.filter(|_| !owned).map(|p| (p.x.floor() as i32, p.y.floor() as i32)))
 }
 
 pub fn too_soon(last: Option<Duration>, now: Duration) -> bool {
@@ -893,7 +894,7 @@ fn play_sounds(
                 result = Err(Skip::Held);
             } else if request.owner.is_some_and(|o| voices.iter().any(|(_, v)| v.owner == Some(o))) {
                 result = Err(Skip::OwnerBusy);
-            } else if too_soon(last.0.get(&repeat_key(cue, request.at)).copied(), now) {
+            } else if too_soon(last.0.get(&repeat_key(cue, request.at, request.owner.is_some())).copied(), now) {
                 result = Err(Skip::TooSoon);
             } else if let Err(skip) = admit(played, cue, false, true, &voices, &listener.0, &mut out.commands) {
                 result = Err(skip);
@@ -901,7 +902,7 @@ fn play_sounds(
         }
         out.log(|| describe_fx("fx", request.sound, request.at, &result));
         let Ok(played) = result else { continue };
-        last.0.insert(repeat_key(cue, request.at), now);
+        last.0.insert(repeat_key(cue, request.at, request.owner.is_some()), now);
         let voice = Voice { cue: Some(cue), info: played.info, at: request.at, owner: request.owner, ..Voice::new(Role::Effect) };
         out.spawn(&played, voice, PlaybackSettings::DESPAWN);
     }
@@ -1230,9 +1231,11 @@ mod tests {
         assert!(too_soon(Some(ms(1000)), ms(1249)));
         assert!(!too_soon(Some(ms(1000)), ms(1250)));
         let stone = SoundCue::StoneRise;
-        assert_eq!(repeat_key(stone, Some(Vec2::new(6.5, 109.5))), repeat_key(stone, Some(Vec2::new(6.9, 109.1))), "same cell");
-        assert_ne!(repeat_key(stone, Some(Vec2::new(6.5, 109.5))), repeat_key(stone, Some(Vec2::new(10.5, 109.5))), "another stone");
-        assert_ne!(repeat_key(stone, None), repeat_key(stone, Some(Vec2::ZERO)));
+        assert_eq!(repeat_key(stone, Some(Vec2::new(6.5, 109.5)), false), repeat_key(stone, Some(Vec2::new(6.9, 109.1)), false), "same cell");
+        assert_ne!(repeat_key(stone, Some(Vec2::new(6.5, 109.5)), false), repeat_key(stone, Some(Vec2::new(10.5, 109.5)), false), "another stone");
+        assert_ne!(repeat_key(stone, None, false), repeat_key(stone, Some(Vec2::ZERO), false));
+        let eat = SoundCue::WildEat;
+        assert_eq!(repeat_key(eat, Some(Vec2::new(6.5, 109.5)), true), repeat_key(eat, Some(Vec2::new(40.5, 9.5)), true), "another eater");
     }
 
     #[test]

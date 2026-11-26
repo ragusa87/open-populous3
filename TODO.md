@@ -2079,9 +2079,12 @@ AGENTS.md's own bar is that everything shippable works with `--no-original`. Sou
   crowd and the shield hum are wired by the id table's triggers (`audio_world.rs`), with the selection/order voices,
   flyby, menu click and site stones (`audio_cues.rs`); sound.md "Playback in the client" lists them. Guesses, tagged
   in code and sound.md:
-  - work sounds every 8 turns of the work (`WORK_EVERY`) rather than on their animation's sync frame (the client
-    sees no animation frame: give the sim or the views the frame, then play on it, the sync frame dropped if the
-    animation changes first);
+  - work sounds (eating and drinking too) every 8 turns of the work (`WORK_EVERY`) rather than on their
+    animation's sync frame (the client sees no animation frame: give the sim or the views the frame, then play on
+    it, the sync frame dropped if the animation changes first);
+  - **question for a spec session**: the eat ids (`0x03`, `0xBE`) fire in person state 15, but a wildman eats
+    beside a tree in state 5 (pop3-rev-analysis.md "Wildmen"): does a wildman at a tree make the eat sound at
+    all, and which state is 15? Ours plays it for `Action::Grazing { drink: false }`;
   - the cast shout as the cast starts, not at the spell's launch;
   - the shield hum within 48 cells of the listener for "drawn near the camera";
   - the lava loop runs to the effect's end (the original stops it once the flow stops growing);

@@ -132,7 +132,8 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
   original's score ("Sound id table": priority, halved by remoteness and by copies of the same sound). A loop only cuts on its first
   start; coming back (next variant, back in reach, after being cut) it waits for a free slot, else loops would
   keep cutting each other (ours). The same sound never restarts within 250 ms (one-shots) from the same cell; from another cell it does (ours: a
-  site's stones land a turn apart, the original keys this by sound id alone).
+  site's stones land a turn apart, the original keys this by sound id alone), except a person's own sounds
+  (eating, drinking, burning, work), keyed by id alone as the original.
 - An owner (a unit) gets no new sound while one of its sounds plays.
 - Loops: `PlayLoop` under a key, sent again to move it or change its volume (0..1: the ambience layers' weights,
   the battle crowd's loudness), and `StopLoop`. A repeat loop replays the same clip; a variety loop takes a fresh
@@ -167,10 +168,10 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
     falling at -100 or faster (the shaman's own; a wildman none); the casting shaman's shout by tribe (ours: as her
     cast starts, the original's at the spell's launch); a wildman converted (`0x05`); turning invisible (once per
     sweep) and visible again.
-  - Per turn, owned by the person (one at a time each, so it carries on): burning (`0x51`), eating and drinking
-    (each half the time one of its two ids), a wildman's mutter (1 in 256 turns idle). Work, every `WORK_EVERY`
-    (8) turns of it, ours for the original's one per animation cycle on its sync frame: chopping and hacking at a
-    building (`0x01`), picking up wood (`0x0A`), hammering (`0x14`), levelling a foundation (`0x02`).
+  - Per turn, owned by the person (one at a time each, so it carries on): burning (`0x51`), a wildman's mutter
+    (1 in 256 turns idle). Work, every `WORK_EVERY` (8) turns of it, ours for the original's one per animation
+    cycle on its sync frame: chopping and hacking at a building (`0x01`), picking up wood (`0x0A`), hammering
+    (`0x14`), levelling a foundation (`0x02`), eating and drinking (each half the time one of its two ids).
   - Effects appearing: a splash, an explosion or a panicking blast (`0xB2`), a simple blast (`0xA1`), lightning,
     ghost army, land bridge (two ids), the angel's cast and meteor launch, its shockwave (`0xDA`), flatten,
     convert, hypnotism, a spy's firebrand, a ground fire catching (`0xB6`). Loops while they live: variety for the
