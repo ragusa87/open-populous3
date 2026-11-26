@@ -172,6 +172,10 @@ so a live measurement may run on it with the addresses translated.
   (turns 14-35) converts the starting wildmen as it reaches them, under a widening spiral of 32 sparkles; the
   stones rise 16 turns each from 256 below to ground level (last one up at turn 68), and the level's flyby may
   already be orbiting the site meanwhile. See "Reincarnation sites".
+- **Convert lasts as long as it keeps converting** [exe, measured on level 17]: every 8 turns the nearest
+  wildman in a 5 × 5 cell square (7 × 7 for the computer) becomes a brave and the effect's life goes back to 18
+  turns; it never draws wildmen in. Its ring is 4 random sparkles a turn on a circle of radius 2.5 cells, each
+  twinkling 4-7 turns. See "Convert wild".
 
 ## Turns and timing [exe]
 ```text
@@ -6293,6 +6297,14 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 - trees.md "Growth": the original regrows 2 wood per 16 turns, one piece in 800 turns (67 s); ours regrow one
   piece every 800 ticks, the same time, in one step.
 - Spell durations in turns convert the same way, e.g. `SHIELD_COUNT_X8` 180 is 1440 turns, 120 s.
+- spells.md Convert (`game_core::convert`), against "Convert wild": ours lives a fixed 18 ticks; the original's
+  life is 18 turns (22 for a computer caster) and goes back to 18 at every conversion, so it keeps going while
+  there is someone to convert. Ours takes the nearest wildman within a 2-cell circle of the cast point; the
+  original scans the 5 × 5 whole cells around the cast cell (7 × 7 for a computer caster), skips wildmen on
+  coast/sea cells and sends them inland to wait instead, and ends at once without converting for a tribe in "give
+  up and sulk". Ours tries first on tick 8; the original on its own 8-turn phase (2 turns after the cast in both
+  measured casts). Ours draws nothing; the original draws 4 sparkles a turn on a circle of radius 1280 (2.5
+  cells) around the cast cell's centre, 4-7 turns each, the levelling's sparkle sprite.
 - Specialists cannot carry wood with the file's values, as in our braves-only rule.
 - huts-and-training.md rule 5 (breeding): our `occupants + 1` per update against `2 × SPROG_TIME × band` gives the
   same time as the original if one update is one turn (original: `2 × (inside + 1)` every 4 turns against
@@ -6336,10 +6348,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   stone also rising out of the ground on arrival, from 256 below to exactly ground level, +16 a turn for 16 turns
   (1.33 s; ours: `RISE_DEPTH` 1.2 cells, `RISE_SECS` 2 s, guessed) - see "Build/rebuild ritual" above. The same
   sequence runs again on a relocation (new shaman, new last-death anchor), not just a one-time level-load step.
-- Wildmen at the site (`ReincarnationSite::welcomes`, ours: converted at level start, all at once, no
-  animation, any wildman within the ring range): the original converts them during the levelling, as the
-  growing disc reaches their cell, each with a conversion flash - on level 7, 3 to 7 turns into it. Any
-  wildman inside the 5-cell disc qualifies, not just the ring of cells (see "Levelling").
+- Wildmen at the site: ours now converts them during the levelling as its disc reaches their cell
+  (`GameMap::convert_in_levelling`, see "Levelling"), any wildman inside the 5-cell disc; no conversion flash
+  drawn, and the brave keeps the wildman's id. Sites built from the start (no ritual) still welcome the ring of
+  cells around them at load (`ReincarnationSite::welcomes`).
 - The levelling's sparkles: a spiral of 32 sparkles widening 160 a turn to 4 cells, each leaving 6-turn small
   sparkles (see "Levelling"); ours draws none.
 - The intro flyby can start before the build ends (level 7: flyby from turn 12, last stone up at 68), orbiting
@@ -6558,6 +6570,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   player's tribe ignores undiscovered trees; no effect on spotting, targeting or combat.
 
 ## Open questions
+- Convert wild ("Convert wild"): the phase of the effect's own 8-turn counter at birth (measured: first try 2
+  turns after the cast, twice); `0x450450`'s exact metric (nearest wildman); what `0x4D6660` does when a coast
+  wildman in person state 8/3 "walks" (assumed: start moving along its new heading, not confirmed live); the
+  "3/0" answers of `0x518200` (bitmap `0x96AA74`) do not change Convert, but their meaning is open.
 - Reincarnation site ("Build/rebuild ritual", "Levelling"): what reads a rising pillar's `+0x6C` (256 → 0 over 8
   turns); what turns on the "remove the player's shaman" mode (level option byte 0x89B7A3 bit 0x2, only ever
   filled by block copies).
@@ -6936,7 +6952,11 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4503F0 | horizontal distance between two positions (wrapping, square root) |
 | 0x50C780, 0x50C840 | "prepare rs land" (7/8): init (site height at tribe+0x915), levelling per turn (disc, conversions, sparkle spiral, "Levelling") |
 | 0x4A7EB0 | reincarnation pillar rise/sink: 16 turns of +16 from ground − 256 to ground; sink 32 turns of −8 then delete |
-| 0x4D7FD0 | replace a unit by a new one of another tribe/type (used for the levelling's wildman → brave) |
+| 0x4D7FD0 | replace a unit by a new one of another tribe/type (the levelling's and Convert's wildman → brave) |
+| 0x5122E0, 0x512350 | Convert wild (7/0x49, effect state 60): init (life 18/22, sound 0xB4), per turn (8-turn tries, sparkles, "Convert wild") |
+| 0x518200 | cell kind at a position: 1 building, 2 cell flag 0x4, 4 not all land (coast shape ≠ 0), else 3/0 by a bitmap at 0x96AA74 |
+| 0x465580 | heading away from a coast cell's water: ((shape direction + 4) & 7) × 256 |
+| 0x4D6523 | person state 8 sub-state 3 (wildman): 64 turns, walk off a coast cell, then stand still |
 | 0x41C140, 0x41C520 | rarer, all-8-pillars-at-once site rebuild path (flag-gated, not the ordinary level-load path - see 0x419880/0x433A10 above), pillars from 0x5A9F10 |
 | 0x468E1C-0x4694F2 | in `draw_polygons`: health bar, low health, shield, bloodlust, hypnosis and selection markers |
 | 0x525450 | health bar of a person |

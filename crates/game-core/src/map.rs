@@ -267,14 +267,15 @@ impl GameMap {
     }
 
     /// The level's people other than shamans (who spawn at their sites), where they are placed.
-    /// Wildmen around a site (`ReincarnationSite::welcomes`) are that tribe's first followers: they
-    /// start as its braves (the original converts them when the shaman appears).
+    /// Wildmen around a site that is not built at the start (`ReincarnationSite::welcomes`) are that tribe's
+    /// first followers: they start as its braves. Around an animated site they stay wildmen until its levelling
+    /// reaches them (`GameMap::convert_in_levelling`).
     fn with_people(mut self, level: &Level) -> Self {
         let people = level.things.iter().filter(|t| t.kind == pop3_format::level::KIND_PERSON && !t.is_shaman());
         for t in people {
             let Some(kind) = UnitKind::from_person_model(t.model) else { continue };
             let cell = ((t.x as u32 / 512) as i32, (t.z as u32 / 512) as i32);
-            let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.enabled && s.welcomes(cell))).flatten();
+            let welcomed = (kind == UnitKind::Wildman).then(|| self.sites.iter().find(|s| s.enabled && !s.animated && s.welcomes(cell))).flatten();
             let (owner, kind) = welcomed.map_or((Owner::from_u8(t.owner), kind), |s| (Owner::Tribe(s.owner), UnitKind::Brave));
             self.spawn(owner, kind, (t.x, t.z));
         }
@@ -1644,7 +1645,7 @@ impl GameMap {
             self.units.iter_mut().for_each(Unit::heal);
         }
         let arriving: Vec<bool> = self.units.iter().map(|u| matches!(u.action, Action::Walking { .. } | Action::Landing)).collect();
-        let (mut events, mut gone) = (Vec::new(), Vec::new());
+        let (mut events, mut gone, mut levelling) = (Vec::new(), Vec::new(), Vec::new());
         for (i, unit) in self.units.iter_mut().enumerate() {
             // Frozen: a lone shaman's pending reincarnation never gets to matter (outcome.md "Automatic
             // elimination") — once the match has ended, Dead stays Dead instead of coming back.
@@ -1661,11 +1662,17 @@ impl GameMap {
                 // An animated site's ground isn't levelled on reincarnation itself any more: the build
                 // ritual grows it, tick by tick, over its own levelling state (`UnitEvent::SiteLevelling`).
                 Some(UnitEvent::Reincarnated) => dirty.extend(site.filter(|s| !s.animated).map(|s| s.flatten_for_spawn(&mut self.terrain))),
-                Some(UnitEvent::SiteLevelling { done, total }) => dirty.extend(site.map(|s| s.level_growing(&mut self.terrain, done, total))),
+                Some(UnitEvent::SiteLevelling { done, total }) => {
+                    dirty.extend(site.map(|s| s.level_growing(&mut self.terrain, done, total)));
+                    levelling.extend(site.map(|s| (s.owner, done)));
+                }
                 Some(UnitEvent::Gone) => gone.push(unit.id),
                 Some(event) => events.push((i, event)),
                 None => {}
             }
+        }
+        for (owner, done) in levelling {
+            self.convert_in_levelling(owner, done);
         }
         for (i, event) in events {
             match event {
@@ -2740,6 +2747,31 @@ mod tests {
         assert_eq!(built_order, vec![7, 6, 5, 4, 3, 2, 1, 0], "fired in reverse slot order, one by one");
         assert_eq!(map.terrain.get(10, 10), 200, "levelled by the time the pillars are up");
         assert_eq!(map.unit(shaman).unwrap().action, Action::Idle, "free once all 8 are up");
+    }
+
+    #[test]
+    fn the_sites_levelling_turns_the_wildmen_it_reaches_into_braves_plus_side_first() {
+        let mut terrain = Heightmap::new(32);
+        terrain.raise((10, 10), 10, 300);
+        let site = ReincarnationSite { animated: true, ..ReincarnationSite::at_cell(TribeId::Blue, (10, 10), 200) };
+        let mut map = GameMap::bare("t", terrain, vec![site]).with_shamans();
+        let centre = |c: u16| c * 512 + 256;
+        let east = map.spawn(Owner::Wild, UnitKind::Wildman, (centre(11), centre(10))).id;
+        let west = map.spawn(Owner::Wild, UnitKind::Wildman, (centre(9), centre(10))).id;
+        let far = map.spawn(Owner::Wild, UnitKind::Wildman, (centre(10), centre(17))).id;
+        let mut converted = std::collections::BTreeMap::new();
+        for t in 0..(crate::site::SETTLE_TICKS + crate::site::LEVEL_TICKS).get() + 2 {
+            map.tick();
+            for id in [east, west, far] {
+                if map.unit(id).is_some_and(|u| u.owner == Owner::Tribe(TribeId::Blue)) {
+                    converted.entry(id).or_insert(t);
+                }
+            }
+        }
+        assert_eq!(map.unit(east).unwrap().kind, UnitKind::Brave);
+        assert!(converted[&east] < converted[&west], "the + side first: {converted:?}");
+        assert!(converted[&east] > crate::site::SETTLE_TICKS.get(), "not before the levelling");
+        assert!(!converted.contains_key(&far), "7 cells out: out of the disc");
     }
 
     #[test]
@@ -4620,8 +4652,8 @@ mod tests {
         assert_eq!(kinds[0].2, UnitKind::Shaman);
         assert_eq!(
             kinds[1..],
-            [(2, Owner::Tribe(TribeId::Blue), UnitKind::Warrior, 0x0b00, 0x1400), (3, Owner::Wild, UnitKind::Wildman, 0x3000, 0x3000), (4, Owner::Tribe(TribeId::Blue), UnitKind::Brave, 0x0c00, 0x1600)],
-            "the wildman next to the site (cell 6, 11 by 5, 10) joins blue as a brave"
+            [(2, Owner::Tribe(TribeId::Blue), UnitKind::Warrior, 0x0b00, 0x1400), (3, Owner::Wild, UnitKind::Wildman, 0x3000, 0x3000), (4, Owner::Wild, UnitKind::Wildman, 0x0c00, 0x1600)],
+            "everyone where placed, the wildmen still wild: the site's levelling converts them"
         );
     }
 
