@@ -6406,11 +6406,12 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   - the linear drain at the full-speed rate matches our guess;
   - the original has one gauge per trigger, driven by the tribe with the most prayers, where ours has one per
     tribe.
-- worship.md "Pyramids of knowledge" (the icon at its top; not drawn by us yet): the original draws the panel's
+- worship.md "Pyramids of knowledge" (the icon at its top, client `vault_icon.rs`): the original draws the panel's
   glyph (hfx 1056-1083, table in "The reward icon over a vault"), not the cursor icons; a fixed billboard at the
   vault's slot-1 point, 1072 above its ground; an animated glow (hfx 1417-1432) 80 below it plus a ground light.
-  It goes when the vault fires (our `Vault::grant`), not when the reward lands 82 turns (6.8 s) later; only
-  permanent discoveries have one.
+  It goes when the vault fires, not when the reward lands 82 turns (6.8 s) later; only permanent discoveries have
+  one. Ours: 160 above the pyramid model's own top (its points reach 1746, so 1072 would be inside it), kept
+  until the top starts closing (the player's choice), no ground light.
 
 - Reincarnation sites (game-client `sites.rs`, game-core `site.rs`): ours put 8 stones on a round ring of 1.3
   cells, not turned, and flatten radius 3 (blend 4). The original: the octagon above (3 cells, 2.8 on the
@@ -6774,6 +6775,8 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   (The per-tribe base capacity, tribe+0x921, is resolved - see "Huts: breeding and growth".)
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
+- Vault icon height: 1072 over the ground is inside the pyramid model as we draw it (object 191's points reach 1746):
+  is the pyramid drawn smaller in the original, or is the slot-1 point not where the icon is seen?
 - Vault icon: whether the clone discovery's own icon is drawn during its 6 turns (drawable flag 0x80 at +0x35, kept
   by the discovery and cleared by the marker), which glow sprite each animation clock value shows (14 steps, 16
   sprites), what game mode 3 is (no markers), and the ground light's parameters (4, 4, 0).
