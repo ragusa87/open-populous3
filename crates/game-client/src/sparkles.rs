@@ -25,17 +25,17 @@ const LOOP: Ticks = Ticks::millis(750);
 /// this same size/rise, just a different tint and a much shorter loop - the original's own in-flight
 /// decoration is "visually indistinguishable in style" from these (pop3-rev-analysis.md "Build/rebuild
 /// ritual").
-const SIZE: f32 = 0.22;
+pub(crate) const SIZE: f32 = 0.22;
 /// How high a star rises over a twinkle, from `LIFT` over the ground (render units).
 const RISE: f32 = 0.35;
-const LIFT: f32 = 0.08;
+pub(crate) const LIFT: f32 = 0.08;
 const TEXTURE: usize = 32;
 const COLOUR: Color = Color::srgb(1.0, 0.92, 0.6);
 
 #[derive(Resource)]
 pub struct SparkleAssets {
-    quad: Handle<Mesh>,
-    material: Handle<StandardMaterial>,
+    pub(crate) quad: Handle<Mesh>,
+    pub(crate) material: Handle<StandardMaterial>,
 }
 
 /// The sparkles of the effect `id`; its stars are children of `entity`.

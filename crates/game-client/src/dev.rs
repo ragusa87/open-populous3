@@ -193,7 +193,7 @@ pub fn convert_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> 
     let Some((x, z)) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))) else { return false };
     let at = world_units(Vec2::new(x, z));
     map.spawn(game_core::tribes::Owner::Wild, game_core::unit::UnitKind::Wildman, (at.0.wrapping_add(50), at.1));
-    map.add_effect(game_core::convert::effect(PLAYER, at));
+    map.add_effect(game_core::convert::effect(PLAYER, at, false));
     map.run(game_core::time::Ticks::new(ticks));
     true
 }
@@ -930,7 +930,9 @@ mod tests {
     #[test]
     fn convert_demo_places_a_wildman_and_converts_it() {
         let mut map = game_core::map::GameMap::sandbox_walk();
-        assert!(convert_demo(&mut map, "10,10", game_core::convert::CHECK_EVERY.get()));
+        let s = map.units.iter().find(|u| u.owner == PLAYER).unwrap();
+        let at = format!("{},{}", s.x as f32 / 512.0 + 2.0, s.z as f32 / 512.0);
+        assert!(convert_demo(&mut map, &at, game_core::convert::CHECK_EVERY.get()));
         let wildman = map.units.iter().find(|u| u.kind == game_core::unit::UnitKind::Brave && u.owner == PLAYER).unwrap();
         assert_eq!(wildman.owner, PLAYER);
         assert!(!convert_demo(&mut map, "here", 0));

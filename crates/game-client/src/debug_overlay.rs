@@ -7,7 +7,6 @@ use crate::keymap::{DevMode, Shortcut, Shortcuts};
 use crate::world::CurrentMap;
 use bevy::prelude::*;
 use game_core::challenge::{FIGHT_REACH, SHOVE_REACH};
-use game_core::convert::RANGE_CELLS as CONVERT_RANGE_CELLS;
 use game_core::earthquake::SINK_RADIUS_CELLS;
 use game_core::effect::EffectKind;
 use game_core::erode::{JITTER_CELLS as ERODE_JITTER_CELLS, RADIUS_CELLS as ERODE_RADIUS_CELLS};
@@ -123,7 +122,7 @@ fn draw(
             EffectKind::Flatten(_) => outline(outline_circle(at, (FLATTEN_RADIUS_SQ as f32).sqrt()), SPELL),
             EffectKind::Erode(_) => outline(outline_square(at, (ERODE_JITTER_CELLS + ERODE_RADIUS_CELLS) as f32), SPELL),
             EffectKind::Swamp(_) => outline(outline_square(at, SWAMP_HALF as f32 + 0.5), SPELL),
-            EffectKind::Convert(_) => outline(outline_circle(at, CONVERT_RANGE_CELLS as f32), SPELL),
+            EffectKind::Convert(c) => outline(outline_square(at.floor() + Vec2::splat(0.5), c.reach() as f32 + 0.5), SPELL),
             EffectKind::Hypnotism(_) | EffectKind::GhostArmy(_) => outline(outline_square(at, BLOCK_HALF_CELLS), SPELL),
             EffectKind::Volcano(_) => {
                 outline(outline_circle(at, RIM_RADIUS_CELLS), SPELL);

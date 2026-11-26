@@ -1211,7 +1211,7 @@ impl GameMap {
                 None
             }
             Spell::Convert { at } => {
-                self.add_effect(crate::convert::effect(player, at));
+                self.add_effect(crate::convert::effect(player, at, self.tribes.is_computer(player)));
                 None
             }
             Spell::Hypnotism { at } => {
@@ -2210,6 +2210,13 @@ impl GameMap {
                 let below = self.terrain.height_at(to.0 as u32, to.1 as u32, pop3_format::WORLD_UNITS_PER_CELL);
                 if let Some(u) = self.unit_mut(unit) {
                     u.arrive_at(to, below);
+                }
+                None
+            }
+            WorldEvent::StepInland { unit, to } => {
+                let now = self.now;
+                if let Some(u) = self.unit_mut(unit) {
+                    u.step_inland(to, now + crate::convert::INLAND_WAIT);
                 }
                 None
             }

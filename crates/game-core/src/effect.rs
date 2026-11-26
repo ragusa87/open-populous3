@@ -139,7 +139,14 @@ impl Effect {
             EffectKind::Lightning(ref mut strike) => strike.turn((self.x, self.z), self.owner, world),
             EffectKind::Flatten(ref mut flatten) => flatten.turn(),
             EffectKind::Erode(ref mut erode) => erode.turn(world.terrain.size() as i32, rng),
-            EffectKind::Convert(ref mut convert) => convert.turn((self.x, self.z), self.owner, world),
+            EffectKind::Convert(ref mut convert) => {
+                let (events, converted) = convert.turn((self.x, self.z), self.owner, world);
+                self.left.tick();
+                if converted {
+                    self.left = Countdown::new(crate::convert::LIFE);
+                }
+                return events;
+            }
             EffectKind::Hypnotism(ref mut hypnotism) => hypnotism.turn((self.x, self.z), self.owner, world),
             EffectKind::Lava(ref mut lava) => lava.turn(now, self.owner, world),
             EffectKind::Volcano(ref mut volcano) => volcano.turn((self.x, self.z), self.owner, world, rng),

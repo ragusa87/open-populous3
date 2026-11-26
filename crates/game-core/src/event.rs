@@ -103,6 +103,9 @@ pub enum WorldEvent {
     StrikeBack { unit: UnitId, at: UnitId },
     /// Teleports `unit` to `to`, landing there like a teleported shaman (`Unit::arrive_at`): Armageddon's arrivals.
     Arrive { unit: UnitId, to: (u16, u16) },
+    /// A wildman on a coast or sea cell in a Convert's square walks to `to`, inland, and waits there
+    /// `convert::INLAND_WAIT` without wandering off (pop3-rev-analysis.md "Convert wild").
+    StepInland { unit: UnitId, to: (u16, u16) },
     /// Sends `unit` walking to `to` (`Order::MoveTo`): Armageddon's fighters running into the middle.
     Rally { unit: UnitId, to: (u16, u16) },
     /// Sets `unit`'s Magical Shield to `steps` (0: none), whatever it had: Armageddon's own shield (armageddon.rs).

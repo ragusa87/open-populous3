@@ -6297,14 +6297,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 - trees.md "Growth": the original regrows 2 wood per 16 turns, one piece in 800 turns (67 s); ours regrow one
   piece every 800 ticks, the same time, in one step.
 - Spell durations in turns convert the same way, e.g. `SHIELD_COUNT_X8` 180 is 1440 turns, 120 s.
-- spells.md Convert (`game_core::convert`), against "Convert wild": ours lives a fixed 18 ticks; the original's
-  life is 18 turns (22 for a computer caster) and goes back to 18 at every conversion, so it keeps going while
-  there is someone to convert. Ours takes the nearest wildman within a 2-cell circle of the cast point; the
-  original scans the 5 × 5 whole cells around the cast cell (7 × 7 for a computer caster), skips wildmen on
-  coast/sea cells and sends them inland to wait instead, and ends at once without converting for a tribe in "give
-  up and sulk". Ours tries first on tick 8; the original on its own 8-turn phase (2 turns after the cast in both
-  measured casts). Ours draws nothing; the original draws 4 sparkles a turn on a circle of radius 1280 (2.5
-  cells) around the cast cell's centre, 4-7 turns each, the levelling's sparkle sprite.
+- spells.md Convert (`game_core::convert`), against "Convert wild": ours now follows it (life, first try on turn
+  2, the square, coast wildmen stepping inland, the sparkle ring), except: no "give up and sulk" ending; a coast
+  wildman walks to just inside the nearest land cell within 2 cells rather than turning away from the coast in
+  4-turn steps; no conversion flash, and the brave keeps the wildman's id.
 - Specialists cannot carry wood with the file's values, as in our braves-only rule.
 - huts-and-training.md rule 5 (breeding): our `occupants + 1` per update against `2 × SPROG_TIME × band` gives the
   same time as the original if one update is one turn (original: `2 × (inside + 1)` every 4 turns against

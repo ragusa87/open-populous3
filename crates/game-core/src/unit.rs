@@ -910,6 +910,14 @@ impl Unit {
         }
     }
 
+    /// A wildman walks inland to `to` and does not wander off before `until` (`WorldEvent::StepInland`).
+    pub(crate) fn step_inland(&mut self, to: (u16, u16), until: Tick) {
+        self.start(Order::MoveTo { x: to.0, z: to.1 });
+        if self.tree_rest_until.since(until) < 0 {
+            self.tree_rest_until = until;
+        }
+    }
+
     /// The walk to eat or drink it is on, if any.
     pub(crate) fn graze_walk(&self) -> Option<crate::wildman::GrazeWalk> {
         self.to_graze.filter(|_| matches!(self.action, Action::Walking { .. } | Action::Stranded { .. }))
