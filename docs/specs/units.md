@@ -81,15 +81,17 @@ or else a generated figure in a hide with a mane, or the brave's rendered sheets
 
 Idle wildmen wander, fully traced (pop3-rev-analysis.md "Wildmen"): on their own rhythm (`wildman::SEEK_EVERY`, a
 guess - the trace gives state 8 no rhythm of its own), an idle one looks for a tree within
-`TREE_SEARCH_RADIUS_CELLS` (18; the original's is 12, the same byte as the shore search, pop3-rev-analysis.md
-"Eating at a tree") to walk to and eat beside (`Action::Grazing { drink: false, .. }`,
+`TREE_SEARCH_RADIUS_CELLS` (12, the same byte as the shore search, pop3-rev-analysis.md "Eating at a tree") to walk to and eat beside (`Action::Grazing { drink: false, .. }`,
 `Pose::Eat`, original anim 2); failing that, a shore cell within `SHORE_SEARCH_RADIUS_CELLS` (12, confirmed) to
 walk to and drink at (`Action::Grazing { drink: true, .. }`, `Pose::Drink`, anim 4) - both original-asset only,
 CC0 art falls back to idle. No plant scenery (types 7/8) is modelled yet, so only trees are searched; "shore" is
 `wildman::is_shore_cell`'s own neighbour-based approximation (dry, walkable, a sea cell among its 4 neighbours),
-standing in for the original's own untranslated coastal-shape table - **both `[ours]`**. It lingers
-`wildman::GRAZE_TICKS` (a guess; the original eats 50-99 turns, 4.2-8.3 s, once within 120 units of the tree,
-pop3-rev-analysis.md "Eating at a tree") before going idle and searching again. No
+standing in for the original's own untranslated coastal-shape table - **both `[ours]`**. Beside a tree it eats
+`wildman::meal_ticks` (50-99 turns, 4.2-8.3 s) and looks for a tree again only `wildman::tree_rest` (128-252
+turns, 10.7-21 s) after arriving (pop3-rev-analysis.md "Eating at a tree"); while that rest runs it stays idle
+(`[ours]`: whether the shore search runs then is not traced). At the shore it lingers `wildman::GRAZE_TICKS` (a
+guess) before going idle and searching again. The walk to the tree is never given up (the original's after 128
+turns: not done). No
 hunger or thirst stat exists anywhere, confirmed absent: both searches only ever pick where an idle animation
 plays, nothing is consumed. A wildman idling at its shore spot genuinely drowns fairly often - no special
 mechanic, just the ordinary per-turn drowning check re-testing the exact fine-grained spot every turn with no

@@ -1,30 +1,53 @@
 //! Wildmen's idle loop (pop3-rev-analysis.md "Wildmen", fully traced): with nothing else to do, an idle
-//! wildman looks for a tree or plant to eat beside, within `TREE_SEARCH_RADIUS_CELLS` (18, confirmed); failing
-//! that, a shore cell to drink at, within `SHORE_SEARCH_RADIUS_CELLS` (12, confirmed). Confirmed `[exe]`: the
-//! full cycle is state 1 -> 8 -> (5 eating or 6/16 drinking) -> 8 -> ..., with no hunger or thirst stat anywhere
-//! - both searches only ever pick where an idle animation plays, never consuming anything. No plant scenery
-//! (types 7/8, trees.md) is modelled yet, so only trees are searched here; the original's own 14-byte
-//! coastal-shape table is not implemented either, so "shore" substitutes `is_shore_cell`'s own neighbour-based
-//! approximation (a walkable cell with a sea neighbour) - **both `[ours]`**, not a faithful port of either table.
-//! Also `[ours]`, not given by the trace: `SEEK_EVERY` (how often an idle wildman looks at all) and
-//! `GRAZE_TICKS` (how long it lingers before wandering off again) - the trace gives state 8 no rhythm of its own
-//! and state 5 no timer at all (state 6/16's own `+0x70`/`+0x7C` reroll isn't pinned to a turn count either).
+//! wildman looks for a tree or plant to eat beside, within `TREE_SEARCH_RADIUS_CELLS`; failing that, a shore
+//! cell to drink at, within `SHORE_SEARCH_RADIUS_CELLS`. Confirmed `[exe]`: the full cycle is state 1 -> 8 ->
+//! (5 -> 15 eating, or 6 -> 16 drinking) -> 8 -> ..., with no hunger or thirst stat anywhere - both searches only
+//! ever pick where an idle animation plays, never consuming anything. A meal lasts `meal_ticks` and the next
+//! tree search waits `tree_rest` from arriving ("Eating at a tree"). No plant scenery (types 7/8, trees.md) is
+//! modelled yet, so only trees are searched here; the original's own 14-byte coastal-shape table is not
+//! implemented either, so "shore" substitutes `is_shore_cell`'s own neighbour-based approximation (a walkable
+//! cell with a sea neighbour) - **both `[ours]`**. Also `[ours]`: `SEEK_EVERY` (how often an idle wildman
+//! looks at all), `GRAZE_TICKS` (how long it drinks: state 16's timer is not pinned to a turn count), the walk
+//! to the tree never given up, and the tree rest stopping the shore search too.
 //! Drowning at the shore needs no code here: it already falls out of the generic per-turn drowning check once a
 //! wildman stands on a wet spot (`Unit::tick`'s own drowning branch, kind-independent).
 
 use crate::map::{torus_cells, torus_dist2, GameMap};
 use crate::path::{Ground, Mobility};
-use crate::time::{Every, Ticks};
+use crate::time::{Every, Tick, Ticks};
 use crate::unit::{is_sea, Action, UnitKind};
 
-/// A tree or plant within this many cells is eaten beside; a guess for plants, confirmed for trees [exe].
-pub const TREE_SEARCH_RADIUS_CELLS: i32 = 18;
+/// A tree or plant within this many cells is eaten beside: the same radius byte as the shore search
+/// ("Eating at a tree" [exe]).
+pub const TREE_SEARCH_RADIUS_CELLS: i32 = 12;
 /// A shore cell within this many cells is drunk at if no tree/plant was found [exe, confirmed].
 pub const SHORE_SEARCH_RADIUS_CELLS: i32 = 12;
 /// How often an idle wildman looks for somewhere to go: a guess, no rhythm given for state 8 itself.
 pub const SEEK_EVERY: Every = Every::new(16);
-/// How long it lingers once there before wandering off again: a guess, no timer given either.
+/// How long it drinks at the shore before wandering off again: a guess, state 16's timer is not pinned.
 pub const GRAZE_TICKS: Ticks = Ticks::secs(8);
+/// A meal beside a tree: `MEAL_MIN` + rand(`MEAL_SPAN`) turns (state 15's `+0x70`, "Eating at a tree" [exe]).
+pub const MEAL_MIN: u32 = 50;
+pub const MEAL_SPAN: u32 = 50;
+/// No tree search for 4 x (`REST_MIN` + rand(`REST_SPAN`)) turns from arriving at a tree (`+0x7B`, from the
+/// per-type byte 64 halved, ticked down every 4 turns: "Eating at a tree" [exe]).
+pub const REST_MIN: u32 = 32;
+pub const REST_SPAN: u32 = 32;
+pub const REST_STEP: u32 = 4;
+
+fn draw(id: crate::unit::UnitId, now: Tick, salt: u32) -> u32 {
+    crate::map::Lcg(id.raw().wrapping_mul(2_654_435_761).wrapping_add(now.to_wire()) ^ salt).next_u32()
+}
+
+/// How long a wildman arriving at its tree at `now` eats there.
+pub fn meal_ticks(id: crate::unit::UnitId, now: Tick) -> Ticks {
+    Ticks::new(MEAL_MIN + draw(id, now, 0) % MEAL_SPAN)
+}
+
+/// How long after arriving at its tree at `now` a wildman looks for a tree again.
+pub fn tree_rest(id: crate::unit::UnitId, now: Tick) -> Ticks {
+    Ticks::new(REST_STEP * (REST_MIN + draw(id, now, 0x5EED) % REST_SPAN))
+}
 
 impl GameMap {
     /// Idle wildmen, on their own rhythm, go eat beside the nearest tree in reach, or else drink at the
@@ -34,7 +57,7 @@ impl GameMap {
         let seeking: Vec<usize> = (0..self.units.len())
             .filter(|&i| {
                 let u = &self.units[i];
-                u.kind == UnitKind::Wildman && u.action == Action::Idle && SEEK_EVERY.fires(now, u.id.raw())
+                u.kind == UnitKind::Wildman && u.action == Action::Idle && SEEK_EVERY.fires(now, u.id.raw()) && now.since(u.tree_rest_until) >= 0
             })
             .collect();
         for i in seeking {
@@ -143,8 +166,29 @@ mod tests {
             matches!(map.unit(w).unwrap().action, Action::Grazing { .. })
         });
         assert!(matches!(map.unit(w).unwrap().action, Action::Grazing { .. }), "test setup: it is grazing");
-        map.run(GRAZE_TICKS + T::new(1));
-        assert_eq!(map.unit(w).unwrap().action, Action::Idle, "left on its own after lingering");
+        map.run(T::new(MEAL_MIN + MEAL_SPAN));
+        assert_eq!(map.unit(w).unwrap().action, Action::Idle, "left on its own after its meal");
+        map.run(T::new(SEEK_EVERY.period() * 2));
+        assert_eq!(map.unit(w).unwrap().action, Action::Idle, "resting before the next tree");
+        map.run(T::new(REST_STEP * (REST_MIN + REST_SPAN)));
+        let back = (0..300).any(|_| {
+            map.run(T::new(1));
+            matches!(map.unit(w).unwrap().action, Action::Grazing { drink: false, .. })
+        });
+        assert!(back, "eats again once rested");
+    }
+
+    #[test]
+    fn a_meal_and_the_rest_after_it_stay_in_the_traced_ranges() {
+        let id = |n| crate::unit::UnitId::from_raw(n);
+        for n in 0..200 {
+            let now = Tick::from_wire(n * 37);
+            let meal = meal_ticks(id(n), now).get();
+            let rest = tree_rest(id(n), now).get();
+            assert!((MEAL_MIN..MEAL_MIN + MEAL_SPAN).contains(&meal));
+            assert!((REST_STEP * REST_MIN..REST_STEP * (REST_MIN + REST_SPAN)).contains(&rest) && rest % REST_STEP == 0);
+            assert!(meal < rest, "the meal ends inside the rest");
+        }
     }
 
     #[test]

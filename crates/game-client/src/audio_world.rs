@@ -122,8 +122,8 @@ pub fn person_cues(before: Option<Seen>, now: Seen, unit: &Unit, own: bool) -> V
     cues
 }
 
-/// Turns between two work sounds of one worker (eating and drinking too). Ours: the original plays one per
-/// animation cycle on its sync frame (sound.md "Sound id table"), the client does not see the frame.
+/// Turns between two work sounds of one worker. Ours: the original plays one per animation cycle on its sync
+/// frame (sound.md "Sound id table"), the client does not see the frame.
 pub const WORK_EVERY: u32 = 8;
 
 /// A wildman mutters 1 time in this many turns idle.
@@ -135,7 +135,7 @@ pub fn turn_cue(unit: &Unit, now: Tick, draw: u64) -> Option<SoundCue> {
     let beat = (now.to_wire().wrapping_add(unit.id.raw())).is_multiple_of(WORK_EVERY);
     match unit.action {
         Action::OnFire { .. } => Some(SoundCue::OnFire),
-        Action::Grazing { drink, .. } if beat => Some(match (drink, draw % 2 == 0) {
+        Action::Grazing { drink, .. } => Some(match (drink, draw % 2 == 0) {
             (false, true) => SoundCue::Eat,
             (false, false) => SoundCue::WildEat,
             (true, true) => SoundCue::Drink,
@@ -565,14 +565,13 @@ mod tests {
     }
 
     #[test]
-    fn work_and_eating_sounds_on_their_beat_burning_every_turn() {
+    fn work_sounds_on_their_beat_eating_and_burning_every_turn() {
         let mut u = person(Brave);
         u.action = Action::Hammering;
         let beats = (0..WORK_EVERY * 2).filter(|&t| turn_cue(&u, Tick::from_wire(t), 0).is_some()).count();
         assert_eq!(beats, 2);
         u.action = Action::Grazing { drink: false, left: game_core::time::Countdown::new(game_core::time::Ticks::new(99)) };
-        let beats = (0..WORK_EVERY * 2).filter(|&t| turn_cue(&u, Tick::from_wire(t), 0).is_some()).count();
-        assert_eq!(beats, 2, "eating waits for its beat too");
+        assert!((0..4).all(|t| turn_cue(&u, Tick::from_wire(t), 0).is_some()), "eating back to back");
         u.action = Action::OnFire { away: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(5)) };
         assert!((0..4).all(|t| turn_cue(&u, Tick::from_wire(t), 0) == Some(SoundCue::OnFire)));
     }

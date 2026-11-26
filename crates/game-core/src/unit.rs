@@ -573,6 +573,8 @@ pub struct Unit {
     to_fire: Option<((u16, u16), u8)>,
     /// A wildman's own walk to eat (`false`) or drink (`true`) once there (`wildman::tend_wildmen`).
     to_graze: Option<bool>,
+    /// A wildman looks for a tree again from this tick (`wildman::tree_rest`).
+    pub(crate) tree_rest_until: Tick,
     /// The tree (position) she is walking to, to cut it once there.
     to_tree: Option<(u16, u16)>,
     /// The piece of wood (position) she is walking to, to pick it up once there.
@@ -677,6 +679,7 @@ impl Unit {
             spell: None,
             to_fire: None,
             to_graze: None,
+            tree_rest_until: Tick::ZERO,
             to_tree: None,
             to_wood: None,
             to_house: None,
@@ -1168,7 +1171,11 @@ impl Unit {
                         } else if let Some(vehicle) = self.to_vehicle.take() {
                             return Some(UnitEvent::AtVehicle { vehicle });
                         } else if let Some(drink) = self.to_graze.take() {
-                            self.action = Action::Grazing { drink, left: Countdown::new(crate::wildman::GRAZE_TICKS) };
+                            let length = if drink { crate::wildman::GRAZE_TICKS } else { crate::wildman::meal_ticks(self.id, now) };
+                            if !drink {
+                                self.tree_rest_until = now + crate::wildman::tree_rest(self.id, now);
+                            }
+                            self.action = Action::Grazing { drink, left: Countdown::new(length) };
                         }
                     }
                 } else if self.hurt(now) {

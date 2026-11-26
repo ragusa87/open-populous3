@@ -6423,12 +6423,9 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   cells) and idle there with ambient sound. Both destinations are deliberate, keyed off the exe's own
   scenery-type and coastal-shape tables - not a random point. No hunger/thirst/age stat exists even so; nothing
   is actually consumed at either stop, it only decides where the idle animation plays.
-  Eating at a tree ("Eating at a tree"): ours searches 18 cells (`TREE_SEARCH_RADIUS_CELLS`), the original 12 -
-  the same radius as the shore search; ours lingers `GRAZE_TICKS` (a guess), the original 50-99 turns (4.2-8.3 s,
-  42-83 of our ticks) once within 120 units of the tree, and gives up the walk after 128 turns (10.7 s, 107 ticks);
-  after a meal the next tree search waits 128-252 turns (10.7-21 s). Ours plays the eat sound while grazing at a
-  tree, which is right: the original plays 0x03 or 0xBE (50/50) whenever no sound is attached to the wildman, so
-  back to back for the whole meal, rather than every 8 turns (`WORK_EVERY`).
+  Eating at a tree ("Eating at a tree"): ours follows the 12-cell radius, the 50-99 turn meal, the 128-252 turn
+  rest before the next tree search and the eat sound back to back (one tick is one turn; an earlier note here
+  gave "42-83 ticks", which was wrong); it does not give up the walk after 128 turns.
   `attack.rs`'s `wildmen_never_fight_and_nobody_attacks_its_own` test makes wildmen entirely unattackable; the
   original only confirms the *automatic* proximity scan skips them (tribe 0xFF is never treated as an enemy) -
   whether an explicit player attack order also respects that filter is still open, so our blanket rule may be
