@@ -478,6 +478,10 @@ impl GameMap {
             let i = model as i32 - 1;
             map.add_building(place(TribeId::Blue, BuildingKind::from_model(model), at(-12 + (i % 7) * 4, 6 + (i / 7) * 4), (i % 4) as u8 * 2));
         }
+        // Its pyramid teaches something, to show the reward's icon over it.
+        for b in map.buildings.iter_mut().filter(|b| b.kind == BuildingKind::Vault) {
+            b.vault = Some(crate::vault::Vault::new(Some(crate::building::Reward::Spell(crate::spell_book::SpellKind::Swarm)), crate::vault::DEFAULT_PRAY_TIME));
+        }
         for (i, model) in [1u8, 3, 4, 7].iter().enumerate() {
             map.add_building(place(TribeId::Red, BuildingKind::from_model(*model), at(-6 + i as i32 * 4, 19), 0));
         }
