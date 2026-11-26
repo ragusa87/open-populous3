@@ -68,6 +68,19 @@ pub fn icon_height(pyramid: Option<&pop3_format::Object>) -> f32 {
     pyramid.and_then(|o| o.points.iter().map(|p| p[1]).max()).map_or(ICON_HEIGHT, |top| top as f32 + OVER_TOP)
 }
 
+/// The middle of `pyramid`'s head (object units, x and z in its own frame): the mean of its points in the top
+/// quarter of its height, the petals round its open top; the model's origin without it.
+pub fn head_centre(pyramid: Option<&pop3_format::Object>) -> (f32, f32) {
+    let Some(o) = pyramid else { return (0.0, 0.0) };
+    let top = o.points.iter().map(|p| p[1]).max().unwrap_or(0) as f32;
+    let head: Vec<_> = o.points.iter().filter(|p| p[1] as f32 >= top * 0.75).collect();
+    if head.is_empty() {
+        return (0.0, 0.0);
+    }
+    let n = head.len() as f32;
+    (head.iter().map(|p| p[0] as f32).sum::<f32>() / n, head.iter().map(|p| p[2] as f32).sum::<f32>() / n)
+}
+
 /// Every sprite `icon_sprite` may name.
 fn icon_sprites() -> impl Iterator<Item = usize> {
     (1056..=1083).chain([414, 415])
@@ -173,12 +186,15 @@ impl WorldView for VaultIconView {
         let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
         let scale = objects.get(crate::object_scale::ObjectGroup::Buildings) / cell;
         let glow = (!assets.glow.is_empty()).then(|| &assets.glow[glow_frame(now.secs_since(game_core::time::Tick::ZERO), assets.glow.len())]);
-        let height = icon_height(models.0.as_ref().and_then(|bank| bank.get(pop3_format::catalog::KNOWLEDGE_PYRAMID)));
+        let pyramid = models.0.as_ref().and_then(|bank| bank.get(pop3_format::catalog::KNOWLEDGE_PYRAMID));
+        let height = icon_height(pyramid);
+        let (hx, hz) = head_centre(pyramid);
+        let head = Quat::from(crate::buildings::facing_yaw(b.facing)) * Vec3::from(crate::game_frame::GamePos(Vec3::new(hx, 0.0, hz) * scale));
         for (part, lift, frame) in [(self.icon, height, None), (self.glow, height - GLOW_BELOW, glow)] {
             let Ok((mut t, mut vis, mut mesh, mut mat)) = parts.get_mut(part) else { continue };
             match ground {
                 Some(g) if part == self.icon || frame.is_some() => {
-                    (t.translation, t.rotation, *vis) = (g + Vec3::Y * lift * scale, facing, Visibility::Inherited);
+                    (t.translation, t.rotation, *vis) = (g + head + Vec3::Y * lift * scale, facing, Visibility::Inherited);
                     if let Some(f) = frame {
                         (mesh.0, mat.0) = (f.mesh.clone(), f.material.clone());
                     }
@@ -227,6 +243,14 @@ mod tests {
         v.phase = VaultPhase::Spent;
         assert!(!shows_icon(&v));
         assert!(!shows_icon(&Vault::new(None, 2)), "nothing to teach");
+    }
+
+    #[test]
+    fn the_head_centre_is_the_middle_of_the_top_points() {
+        let points = vec![[-100, 0, -100], [100, 0, 100], [40, 1000, 60], [60, 1000, 100], [50, 800, 80]];
+        let o = pop3_format::Object { points, ..Default::default() };
+        assert_eq!(head_centre(Some(&o)), (50.0, 80.0), "the base points left out");
+        assert_eq!(head_centre(None), (0.0, 0.0));
     }
 
     #[test]
