@@ -161,7 +161,7 @@ pub fn posed(bank: &ObjectBank, base: usize, frame: MorphFrame) -> Option<Object
     if from.points.len() != base.points.len() || to.points.len() != base.points.len() {
         return None;
     }
-    Some(Object { points: morph_points(&from.points, &to.points, frame.num, frame.den), faces: base.faces.clone() })
+    Some(Object { points: morph_points(&from.points, &to.points, frame.num, frame.den), faces: base.faces.clone(), scale: base.scale })
 }
 
 /// The stand-in's wing angles (flap up, sweep back), radians: flapping with the loop while beating, swept back by
@@ -464,7 +464,7 @@ mod tests {
     use game_core::unit::UnitId;
 
     fn obj(points: Vec<[i16; 3]>) -> Object {
-        Object { points, faces: Vec::new() }
+        Object { points, faces: Vec::new(), scale: 0 }
     }
 
     fn angel_morph() -> Morph {
@@ -545,7 +545,7 @@ mod tests {
     fn a_posed_frame_has_the_base_faces_and_points_between_two_keys() {
         let mut bank = ObjectBank { objects: vec![Object::default(); 117] };
         let face = pop3_format::Face { tile: Some(1), colour: 0, points: vec![0, 1, 2], uv: vec![(0, 0); 3], flags: 0 };
-        bank.objects[100] = Object { points: vec![[0; 3]; 3], faces: vec![face.clone()] };
+        bank.objects[100] = Object { points: vec![[0; 3]; 3], faces: vec![face.clone()], scale: 0 };
         bank.objects[101] = obj(vec![[0, 0, 0], [10, 0, 0], [0, 10, 0]]);
         bank.objects[102] = obj(vec![[0, 0, 0], [20, 0, 0], [0, 30, 0]]);
         let p = posed(&bank, 100, MorphFrame { from: 101, to: 102, num: 1, den: 2 }).unwrap();

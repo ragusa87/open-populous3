@@ -121,7 +121,7 @@ fn original_trees(
     let trees = (0..VARIANTS as usize)
         .map(|v| {
             let obj = bank.get(tree_object_in_bank(object_bank, v as u8))?;
-            let height = obj.points.iter().map(|p| p[1]).max().unwrap_or(0) as f32 / WORLD_UNITS_PER_CELL as f32;
+            let height = obj.points.iter().map(|p| p[1]).max().unwrap_or(0) as f32 * obj.cells_per_unit();
             Some((meshes.add(to_mesh(object_mesh(obj, TribeId::Blue))), height))
         })
         .collect::<Option<Vec<_>>>()?;

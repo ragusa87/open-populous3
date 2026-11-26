@@ -6,7 +6,7 @@
 use crate::game_frame::GamePos;
 use crate::original_models::MeshData;
 use bevy::math::Vec3;
-use pop3_format::{Object, WORLD_UNITS_PER_CELL};
+use pop3_format::Object;
 
 /// Beam thickness (cells) of the wooden structure.
 pub const BEAM: f32 = 0.022;
@@ -58,7 +58,7 @@ pub fn pushed(mesh: &MeshData, by: f32) -> MeshData {
 /// doubled), in cells, drawn mirrored like `original_models::object_mesh`.
 pub fn object_edges(obj: &Object) -> Vec<Edge> {
     let mut seen = std::collections::BTreeSet::new();
-    let scale = 1.0 / WORLD_UNITS_PER_CELL as f32;
+    let scale = obj.cells_per_unit();
     let point = |i: u16| {
         let p = obj.points[i as usize];
         Vec3::from(GamePos(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale))
@@ -195,6 +195,7 @@ mod tests {
                 Face { tile: None, colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0 },
                 Face { tile: None, colour: 0, points: vec![0, 1, 4], uv: vec![(0, 0); 3], flags: 0 },
             ],
+            scale: 0,
         };
         let edges = object_edges(&obj);
         assert_eq!(edges.len(), 6, "4 of the quad + 2 more of the triangle, 0-1 shared");

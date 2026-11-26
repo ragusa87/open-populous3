@@ -56,7 +56,7 @@ impl<'a> Frames<'a> {
                 }
             })
             .collect();
-        Object { points, faces: self.closed.faces.clone() }
+        Object { points, faces: self.closed.faces.clone(), scale: self.closed.scale }
     }
 }
 
@@ -116,7 +116,7 @@ mod tests {
     use super::*;
 
     fn frame(door_y: i16, top_x: i16, noise: i16) -> Object {
-        Object { points: vec![[0, noise, 0], [0, door_y, -500], [top_x, 1700, 0]], faces: Vec::new() }
+        Object { points: vec![[0, noise, 0], [0, door_y, -500], [top_x, 1700, 0]], faces: Vec::new(), scale: 0 }
     }
 
     #[test]
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn frames_must_share_their_mesh() {
         let (closed, open) = (frame(0, 150, 0), frame(480, 150, 0));
-        let other = Object { points: vec![[0, 0, 0]], faces: Vec::new() };
+        let other = Object { points: vec![[0, 0, 0]], faces: Vec::new(), scale: 0 };
         assert!(Frames::new(&closed, &open, &other).is_none());
     }
 

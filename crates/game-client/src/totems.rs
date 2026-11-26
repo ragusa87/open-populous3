@@ -138,7 +138,7 @@ pub fn twisted(stored: &Object, turned: &Object, fraction: f32) -> Object {
             [(r * a.cos()).round() as i16, p[1], (r * a.sin()).round() as i16]
         })
         .collect();
-    Object { points, faces: stored.faces.clone() }
+    Object { points, faces: stored.faces.clone(), scale: stored.scale }
 }
 
 /// The stone head split at its neck: its pedestal, and its head (every face with all its points at
@@ -146,7 +146,7 @@ pub fn twisted(stored: &Object, turned: &Object, fraction: f32) -> Object {
 pub fn split_head(obj: &Object) -> (Object, Object) {
     let (head, pedestal): (Vec<_>, Vec<_>) = obj.faces.iter().cloned().partition(|f| f.points.iter().all(|&i| obj.points[i as usize][1] >= NECK));
     let lowered = obj.points.iter().map(|p| [p[0], p[1] - NECK, p[2]]).collect();
-    (Object { points: obj.points.clone(), faces: pedestal }, Object { points: lowered, faces: head })
+    (Object { points: obj.points.clone(), faces: pedestal, scale: obj.scale }, Object { points: lowered, faces: head, scale: obj.scale })
 }
 
 /// The stone head's nod (radians) at `secs`: `NOD_DEG` each way, one nod every `NOD_SECS`.
@@ -201,7 +201,7 @@ fn respawn_totems(
     for (index, t) in map.0.totems.iter().enumerate() {
         let at = Vec2::new(t.x as f32, t.z as f32) / cell;
         let parts: Vec<_> = bank.map(|bank| totem_objects(t.kind).into_iter().filter_map(|i| bank.get(i)).collect()).unwrap_or_default();
-        let top = parts.iter().flat_map(|o| o.points.iter().map(|p| p[1])).max().map_or(PILLAR.y, |y| y as f32 / cell);
+        let top = parts.iter().flat_map(|o| o.points.iter().map(|p| p[1] as f32 * o.cells_per_unit())).reduce(f32::max).unwrap_or(PILLAR.y);
         let mut view = commands.spawn((TotemView { index, top }, crate::object_scale::Scaled(crate::object_scale::ObjectGroup::Scenery), crate::hover::Hoverable::default(), Grounded { at, half: HALF }, Transform::default(), Visibility::Hidden));
         if t.kind == TotemKind::Totem {
             view.with_children(|v| {
@@ -248,7 +248,7 @@ fn respawn_totems(
                 TotemKind::StoneHead => {
                     let (pedestal, head) = split_head(&solid);
                     body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&pedestal, TribeId::Blue)))), None, None));
-                    body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&head, TribeId::Blue)))), None, Some(NECK as f32 / cell)));
+                    body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&head, TribeId::Blue)))), None, Some(NECK as f32 * obj.cells_per_unit())));
                 }
                 _ => body.push((Mesh3d(meshes.add(to_mesh(object_mesh(&solid, TribeId::Blue)))), None, None)),
             }
@@ -365,8 +365,8 @@ mod tests {
     fn only_the_turning_rings_go_round_by_the_whole_turn() {
         let still = ring(160, 0.3, 212.0);
         let (from, to) = (ring(160, 0.0, 196.0), ring(160, 0.34, 214.0));
-        let stored = Object { points: vec![still, from], faces: Vec::new() };
-        let turned = Object { points: vec![still, to], faces: Vec::new() };
+        let stored = Object { points: vec![still, from], faces: Vec::new(), scale: 0 };
+        let turned = Object { points: vec![still, to], faces: Vec::new(), scale: 0 };
         assert_eq!(twisted(&stored, &turned, 0.0).points, stored.points, "as stored");
         let end = twisted(&stored, &turned, 1.0);
         assert_eq!(end.points[0], still, "a ring object 3 leaves alone");
@@ -379,7 +379,7 @@ mod tests {
     fn the_stone_head_splits_at_its_neck_and_nods() {
         let quad = |a: u16, b: u16, c: u16, d: u16| Face { tile: Some(1), colour: 0, points: vec![a, b, c, d], uv: vec![(0, 0); 4], flags: 6 };
         let points = vec![[0, 0, 0], [10, 0, 0], [10, NECK, 0], [0, NECK, 0], [10, 900, 0], [0, 900, 0]];
-        let (pedestal, head) = split_head(&Object { points, faces: vec![quad(0, 1, 2, 3), quad(3, 2, 4, 5)] });
+        let (pedestal, head) = split_head(&Object { points, faces: vec![quad(0, 1, 2, 3), quad(3, 2, 4, 5)], scale: 0 });
         assert_eq!((pedestal.faces.len(), head.faces.len()), (1, 1));
         assert_eq!(head.points[3], [0, 0, 0], "the neck is the head's origin");
         assert_eq!(nod_angle(0.0), 0.0);

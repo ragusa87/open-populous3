@@ -42,14 +42,26 @@ impl Face {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Object {
-    /// x, y (up), z in world units (512 per cell).
+    /// x, y (up), z in the object's own units: `cells_per_unit` each, on all three axes.
     pub points: Vec<[i16; 3]>,
     pub faces: Vec<Face>,
+    /// Drawing scale, the record's u32 at offset 12: a point unit is `scale / 65536` cells (objects.md
+    /// "Records", pop3-rev-analysis.md "Model size"); 0 when not read (then 512 units a cell).
+    pub scale: u32,
 }
+
+/// The scale that makes a point unit 1/512 of a cell, the one assumed when an object has none.
+pub const PLAIN_SCALE: u32 = 128;
 
 impl Object {
     pub fn is_empty(&self) -> bool {
         self.faces.is_empty()
+    }
+
+    /// Cells per point unit, on every axis.
+    pub fn cells_per_unit(&self) -> f32 {
+        let scale = if self.scale == 0 { PLAIN_SCALE } else { self.scale };
+        scale as f32 / 65536.0
     }
 }
 
@@ -106,7 +118,7 @@ impl ObjectBank {
                             .filter_map(|r| parse_face(r))
                             .filter(|f| f.points.iter().all(|&i| (i as usize) < points.len()))
                             .collect();
-                        Object { points, faces }
+                        Object { points, faces, scale: u32::from_le_bytes([r[12], r[13], r[14], r[15]]) }
                     }
                     _ => Object::default(),
                 }
@@ -186,6 +198,19 @@ mod tests {
             r[40 + k * 2..42 + k * 2].copy_from_slice(&i.to_le_bytes());
         }
         r
+    }
+
+    #[test]
+    fn the_drawing_scale_is_read_and_a_missing_one_is_512_units_a_cell() {
+        let pnts: Vec<u8> = [[0i16, 0, 0], [1, 2, 3], [4, 5, 6]].iter().flat_map(|p| p.iter().flat_map(|v| v.to_le_bytes())).collect();
+        let facs = face_rec(17, &[0, 1, 2]);
+        let mut rec = object_rec((1, 2), (1, 4));
+        rec[12..16].copy_from_slice(&150u32.to_le_bytes());
+        let bank = ObjectBank::parse(&rec, &pnts, &facs);
+        let o = bank.get(0).unwrap();
+        assert_eq!(o.scale, 150);
+        assert_eq!(o.cells_per_unit(), 150.0 / 65536.0, "the pyramid's: 437 units a cell");
+        assert_eq!(Object::default().cells_per_unit(), 1.0 / 512.0);
     }
 
     #[test]

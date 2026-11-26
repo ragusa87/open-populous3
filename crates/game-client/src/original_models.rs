@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use pop3_format::objects::{ATLAS_HEIGHT, ATLAS_WIDTH, TILE};
 use pop3_format::catalog::tribe_tile;
-use pop3_format::{Atlas, Object, ObjectBank, WORLD_UNITS_PER_CELL};
+use pop3_format::{Atlas, Object, ObjectBank};
 use std::path::Path;
 
 /// Rows appended under the atlas holding the 256 palette colours, for untextured faces.
@@ -42,7 +42,7 @@ pub struct MeshData {
 /// world (`game_frame`: the objects are in the game's left-handed frame), with the
 /// tribe-coloured tiles of `tribe` (objects are stored in blue).
 pub fn object_mesh(obj: &Object, tribe: game_core::tribes::TribeId) -> MeshData {
-    let scale = 1.0 / WORLD_UNITS_PER_CELL as f32;
+    let scale = obj.cells_per_unit();
     let mut m = MeshData::default();
     for face in &obj.faces {
         let corners: Vec<([f32; 3], [f32; 2])> = face
@@ -71,7 +71,7 @@ pub fn object_mesh(obj: &Object, tribe: game_core::tribes::TribeId) -> MeshData 
 
 /// `obj` without its blended faces (the flames, drawn by `flame`).
 pub fn solid_part(obj: &Object) -> Object {
-    Object { points: obj.points.clone(), faces: obj.faces.iter().filter(|f| !f.is_alpha()).cloned().collect() }
+    Object { points: obj.points.clone(), faces: obj.faces.iter().filter(|f| !f.is_alpha()).cloned().collect(), scale: obj.scale }
 }
 
 /// Normalised UV in the atlas image (atlas + palette rows); flat faces sample their palette texel.
@@ -141,7 +141,15 @@ mod tests {
         Object {
             points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]],
             faces: vec![Face { tile: Some(9), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0 }],
+            scale: 0,
         }
+    }
+
+    #[test]
+    fn a_model_is_drawn_at_its_own_scale() {
+        let height = |scale| object_mesh(&Object { scale, ..quad() }, game_core::tribes::TribeId::Blue).positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+        assert_eq!(height(0), 1.0, "no scale: 512 units a cell");
+        assert_eq!(height(160), 1.25, "a building's: 1.25 times");
     }
 
     #[test]

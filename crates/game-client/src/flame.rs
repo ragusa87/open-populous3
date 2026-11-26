@@ -18,7 +18,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use pop3_format::blend::{AlphaTable, STRENGTHS, TINTS};
 use pop3_format::catalog::FLAME_TILE;
 use pop3_format::objects::{ATLAS_WIDTH, TILE};
-use pop3_format::{Atlas, Object, Theme, WORLD_UNITS_PER_CELL};
+use pop3_format::{Atlas, Object, Theme};
 use std::f32::consts::{PI, TAU};
 
 /// Frames of the loop and how fast it plays.
@@ -128,7 +128,7 @@ pub fn generated_tile() -> Vec<u8> {
 /// The blended faces (`Face::is_alpha`) of `obj` in cells, each sampling its own tile as a whole
 /// picture (UVs 0-1 within the tile, not the atlas): the flame's boards.
 pub fn flame_mesh(obj: &Object) -> MeshData {
-    let scale = 1.0 / WORLD_UNITS_PER_CELL as f32;
+    let scale = obj.cells_per_unit();
     let texel = |c: i32| (c as f32 / 65536.0).clamp(0.5, TILE as f32 - 0.5) / TILE as f32;
     let mut m = MeshData::default();
     for face in obj.faces.iter().filter(|f| f.is_alpha()) {
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn flame_mesh_keeps_only_blended_faces_with_tile_uvs() {
         let face = |flags, uv: i32| Face { tile: Some(92), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0), (uv << 16, 0), (uv << 16, 31 << 16), (0, 31 << 16)], flags };
-        let obj = Object { points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]], faces: vec![face(0, 31), face(pop3_format::objects::FACE_ALPHA, 15)] };
+        let obj = Object { points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]], faces: vec![face(0, 31), face(pop3_format::objects::FACE_ALPHA, 15)], scale: 0 };
         let m = flame_mesh(&obj);
         assert_eq!(m.indices.len(), 6, "the blended face only");
         assert_eq!(m.positions[1], [1.0, 1.0, 0.0], "corners 0, 2, 1 once mirrored");
