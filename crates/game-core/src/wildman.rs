@@ -98,7 +98,7 @@ impl GameMap {
             .flat_map(|dz| (-r..=r).map(move |dx| (dx, dz)))
             .map(|(dx, dz)| ((cx + dx).rem_euclid(size), (cz + dz).rem_euclid(size)))
             .filter(|&cell| self.is_shore_cell(cell))
-            .map(|cell| crate::slots::spot_centre(cell))
+            .map(crate::slots::cell_centre)
             .min_by_key(|&p| torus_dist2(at, p))
     }
 }
@@ -153,6 +153,8 @@ mod tests {
             matches!(map.unit(w).unwrap().action, Action::Grazing { drink: true, .. })
         });
         assert!(arrived.is_some(), "drinking at the shore");
+        let u = map.unit(w).unwrap();
+        assert!(map.is_shore_cell((crate::unit::cell_of(u.x), crate::unit::cell_of(u.z))), "standing on the shore it drinks at");
     }
 
     #[test]
