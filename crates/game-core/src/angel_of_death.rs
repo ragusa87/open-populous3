@@ -58,6 +58,8 @@ pub const CARRY_TICKS: Ticks = Ticks::new(28);
 pub const GRAB_REACH: i32 = 504;
 pub const GRAB_RANGE_HOUSED: i32 = 200;
 pub const FIGHT_RANGE: i32 = 312;
+/// What a grab jolts its victim's vehicle by, along the angel's heading, world units ("Vehicle passengers" [exe]).
+pub const GRAB_VEHICLE_PUSH: i32 = 40;
 /// `[ours]`: the wear a building takes when an angel pulls someone out of it (blast's own `BLAST_DAMAGE_BLDG`).
 pub const GRAB_BUILDING_WEAR: u16 = crate::blast::DAMAGE_BLDG;
 /// `[ours]`: its own cruising speed (`UnitKind::AngelOfDeath::speed`'s single source), world units/tick.
@@ -553,11 +555,27 @@ impl GameMap {
         }
     }
 
+    /// Vehicle `id` moved `(dx, dz)` (world units), unless that puts it on ground it cannot be on: the original's
+    /// push is slope-scaled, ours is not `[ours]`.
+    fn push_vehicle(&mut self, id: crate::vehicle::VehicleId, (dx, dz): (i32, i32)) {
+        let Some(v) = self.vehicles.get(id) else { return };
+        let to = (v.x.wrapping_add(dx as u16), v.z.wrapping_add(dz as u16));
+        let cell = (crate::unit::cell_of(to.0), crate::unit::cell_of(to.1));
+        let ground = crate::path::Walled { terrain: &self.terrain, walls: &self.walls, inside: None };
+        if crate::path::Ground::passable(&ground, v.kind.mobility(), cell) {
+            let v = self.vehicles.get_mut(id).unwrap();
+            (v.x, v.z) = to;
+        }
+    }
+
     /// Angel `by` takes `victim` at `at`: out of its building there (which takes `GRAB_BUILDING_WEAR`) or out of
-    /// its vehicle, held from now on (pop3-rev-analysis.md: state 40's ENTER case evicts a housed victim).
+    /// its vehicle, which it jolts `GRAB_VEHICLE_PUSH` along its own heading, held from now on (pop3-rev-analysis.md:
+    /// state 40's ENTER case evicts a housed victim; "Vehicle passengers").
     fn grab(&mut self, by: UnitId, victim: UnitId, at: (u16, u16), housed: Option<crate::building::BuildingId>) -> Vec<WorldEvent> {
         if let Some(vehicle) = self.unit(victim).and_then(|v| v.aboard) {
             self.evict(vehicle, &[victim]);
+            let heading = self.unit(by).and_then(|u| u.angel).map_or(Angle::ZERO, |a| a.flight.heading);
+            self.push_vehicle(vehicle, angle::rotate((GRAB_VEHICLE_PUSH, 0), heading.steps()));
         }
         let Some(v) = self.unit_mut(victim) else { return Vec::new() };
         v.inside = None;
@@ -1041,7 +1059,9 @@ mod tests {
         map.vehicles.get_mut(vehicle).unwrap().passengers.push(victim);
         assert!(until_grabbed(&mut map, victim));
         assert_eq!(map.unit(victim).unwrap().aboard, None);
-        assert!(!map.vehicles.get(vehicle).unwrap().passengers.contains(&victim));
+        let v = map.vehicles.get(vehicle).unwrap();
+        assert!(!v.passengers.contains(&victim));
+        assert_eq!(torus_dist2((v.x, v.z), at), (GRAB_VEHICLE_PUSH as i64).pow(2), "jolted along the angel's heading");
     }
 
     #[test]

@@ -578,18 +578,17 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   - Our own guesses to confirm or replace: the ramps (`ACCEL`, `TURN_RATE`, `CLIMB_RATE`), `CARRY_SPEED`, the
     throw's speed, the angel-vs-angel damage (a quarter of the winner's health), the wear a
     building takes when an angel pulls someone out, a dead angel's victim dropped alive, the area panic sparing
-    people inside buildings and vehicles (vehicles traced, pop3-rev-analysis.md "Angel of Death mechanics",
-    "Vehicle passengers": a passenger IS panicked but stays seated and unmoved; only if it is the driver does its
-    panic speed read as "driver moving" and set the vehicle off towards the driver's last destination), firewarriors
-    on sight of an angel.
+    people inside buildings (vehicles traced, "Vehicle passengers": a passenger IS panicked but stays seated, so ours
+    leaving it out only misses the driver's case: its panic reads as "driver moving", setting the vehicle off towards
+    the driver's last destination, a balloon near it unloading the driver - not done), firewarriors on sight of an
+    angel.
   - Not done: the rival-angel scan is map-wide (trace: "nearby", no radius); its roar (no audio, "Sound"); its shadow
     shattering into debris as it appears (client, no shadow companion to shatter); attacking buildings for their
     own sake; an angel's reaction to being shot.
   - To trace (spec session): where the kill-count/duration check really lives (unopened outer sub-states of state
     28) and whether the per-kill hit-point cost exists, the exact angel-vs-angel damage scaling, building attacks
-    and exclusions, how a dead angel leaves the game. Traced: a grabbed vehicle passenger is taken off its vehicle
-    (forced disembark at the vehicle's exit point) and the vehicle gets a 40-unit push along the angel's heading
-    (pop3-rev-analysis.md "Vehicle passengers"); whether the angel's target scan ever picks a passenger was not
+    and exclusions, how a dead angel leaves the game. Done: a grabbed vehicle passenger is taken off its vehicle and
+    the vehicle jolted 40 units along the angel's heading (`GRAB_VEHICLE_PUSH`, not slope-scaled); whether the angel's target scan ever picks a passenger was not
     re-read.
 - [x] Firestorm's own look (pop3-rev-analysis.md "Firestorm fireballs"): fixed — `fireball_shot.rs` [client] gives `panicking_blast`'s own effect a view of its own (both Firestorm's and Volcano's fireballs, which share it): a bright ball falling from above, shrinking as it nears the ground, a few dimmer embers trailing behind it (not `smoke.rs`'s grey puffs), landing in a flash that grows and fades into a last puff of smoke; `ground_fire.rs`'s standing flame is unchanged. Our own invented flight and look throughout (the original's hfx 1120-1127/90-93/~1180-1210 sprites, confirmed by eye last session, are not traced closely enough to follow pixel for pixel). `panicking_blast::VISUAL_TICKS` keeps the effect (and so this view) alive well past its own 3-turn blast purely so the fall/trail/burst has room to play out — the blast's own damage/push/panic are unaffected (already a no-op past turn 3). Blast's own `SimpleBlast` fireball now has its own, separate pair of views instead of reusing this one (`blast_fireball.rs`, `blast_impact.rs` [client], TODO.md "Blast push and flight"): its flight is a straight line from the shaman rather than a fall from above, and its landing is sized small on purpose rather than matching the blast's own multi-cell damage radius.
 - [x] Firestorm fireballs landing on water no longer start a ground fire (`firestorm::impact`, spells.md): matches
