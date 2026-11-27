@@ -50,16 +50,20 @@ crates/
 each kind of object in a fixed, written order. The original runs every unit of every kind in ONE interleaved pass
 (creation order, newest first), after the commands, the computer AI and the fights, and before the tribe recount,
 income, terrain recompute and spell charging (pop3-rev-analysis.md "Order of work inside a turn"). Ours keeps one
-list per kind, in this order:
+list per kind, in this order (nothing in the original orders people before effects or the reverse: the per-kind
+grouping stays an approximation):
+0. the computer tribes, as the original's commands and native AI run ahead of its turn: a script's flyby playing or
+   cancelled, cleared once it's over (`tend_flyby`, `ai_script.rs`), each computer tribe's own script
+   (`tend_ai_scripts`, docs/specs/ai-scripts.md), then its native AI (`tend_native_ai`, spells, defence, sorties,
+   spies). A player's commands are applied before the tick that follows their click (`GameMap::step`,
+   multiplayer.md "Schedule"), never inside the turn being run, as the original's;
 1. walls (`update_walls`), then trees (`Tree::tick`);
 2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), Blast's
    own fireball shots in flight (`tend_fireballs`, spells.md "Blast"), then effects (`tend_effects`): before
    anything they act on, so units react the same turn;
 3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems, training,
    vehicle huts (`tend_vehicle_huts`), huts' own breeding and growth (`tend_huts`, huts-and-training.md "Huts");
-4. a script's flyby playing or cancelled, cleared once it's over (`tend_flyby`, `ai_script.rs`), then each
-   computer tribe's own script (`tend_ai_scripts`, docs/specs/ai-scripts.md), then
-   spotting (`spot_enemies`), attacks followed (`tend_attacks`), buildings hacked (`tend_wrecking`) (combat.md),
+4. spies meeting (`tend_spy_meetings`), spotting (`spot_enemies`), attacks followed (`tend_attacks`), buildings hacked (`tend_wrecking`) (combat.md),
    and idle wildmen sent off to eat or drink (`tend_wildmen`, pop3-rev-analysis.md "Wildmen");
 5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
    finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending

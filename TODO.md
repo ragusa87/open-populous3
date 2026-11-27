@@ -78,14 +78,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [x] Healing (combat.md "Health"): implemented - life can go past full by up to one heal (`Health::heal_past_max`), and a lightning hit that doesn't kill now blocks healing for a while (`Unit::statuses.struck_by_lightning`, a tagged guess for the duration since every lightning hit today is a kill). The angel of death never heals (`KindStats::heal` None).
 
 ### The tick ([architecture.md](docs/architecture.md) "The tick")
-- [ ] Order of work inside a turn, now traced (pop3-rev-analysis.md "Order of work inside a turn"): the original runs
-  the queued tribe commands, then the computer tribes' AI, then formations, challenges and fights, then ONE pass over
-  every unit of every kind interleaved in creation order (newest first; a unit made during the pass waits for next
-  turn), then the tribe recount with income, the terrain recompute and, near the very end, the mana distribution
-  (spell charging). To change in `GameMap::tick` (architecture.md "The tick"): run `tend_ai_scripts` before the
-  kinds' own steps 1-3 (ours: after buildings); keep mana last (matches); make sure a player command never acts in
-  the turn it was clicked (the original applies it at the start of a later turn). Our per-kind grouping stays an
-  approximation: nothing in the original orders people before effects or the reverse.
+- [x] Order of work inside a turn (pop3-rev-analysis.md "Order of work inside a turn"): the computer tribes' scripts and AI run first, mana last, a player's command before the tick after its click (architecture.md "The tick"). Our per-kind grouping stays an approximation of the original's one interleaved unit pass.
 - [x] Audited (2026-10-29): every rhythm this item named already runs on the `Every`/phase-0 convention, most
   already done despite the item's own wording - stranded hurt (`STRANDED_HURT_EVERY`, each unit at its own phase,
   documented intentionally, units.md; the damage amount and rhythm are now known and both wrong, pop3-rev-

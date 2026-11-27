@@ -1594,6 +1594,17 @@ impl GameMap {
         // A ghost shaman's own death never drives reincarnation (docs/plans/ghost.md: never cached as "the
         // tribe's shaman" either).
         let shamans_alive: Vec<bool> = self.units.iter().map(|u| u.kind == UnitKind::Shaman && !u.statuses.ghost && u.is_alive()).collect();
+        // The computer tribes first, before anything of the turn itself, as the original runs their commands and
+        // native AI ahead of its turn (pop3-rev-analysis.md "Order of work inside a turn").
+        if !frozen {
+            self.tend_flyby();
+            self.tend_ai_scripts();
+            self.tend_native_ai();
+            self.tend_ai_spellcasting();
+            self.tend_ai_defense();
+            self.tend_ai_sorties();
+            self.tend_ai_spies();
+        }
         self.update_walls();
         let (buildings, now, terrain) = (&self.buildings, self.now, &self.terrain);
         self.trees.iter_mut().filter(|t| !buildings.iter().any(|b| b.covers((t.x, t.z), 0))).for_each(|t| t.tick(now, crate::unit::is_sea(terrain, t.cell())));
@@ -1628,13 +1639,6 @@ impl GameMap {
         // (formation.rs) tick right after, for the same reason, though they are not coordinators themselves
         // (membership isn't owned through the units' own action).
         if !frozen {
-            self.tend_flyby();
-            self.tend_ai_scripts();
-            self.tend_native_ai();
-            self.tend_ai_spellcasting();
-            self.tend_ai_defense();
-            self.tend_ai_sorties();
-            self.tend_ai_spies();
             self.tend_spy_meetings();
             self.spot_enemies();
             self.tend_attacks();
