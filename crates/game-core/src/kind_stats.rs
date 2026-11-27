@@ -6,7 +6,7 @@ use crate::unit::UnitKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KindStats {
-    /// Full life (constant.dat values; wildmen have none, a brave's stands in). This compiled-in default
+    /// Full life (constant.dat values; the wildman's 32 is the exe's own, no constant names it). This compiled-in default
     /// is what `Unit::new`/`Unit::change_owner` themselves still reset health to; the live simulation
     /// corrects it against a real install's own `LIFE_<P>` right after, through `Balance::units`
     /// (`GameMap::spawn`/`with_shamans`/`change_owner`, `balance.rs`) - everywhere else (tests, and every
@@ -54,7 +54,7 @@ const WARRIOR: KindStats = KindStats { life: 1800, heal: Some(6), fight_damage: 
 const PREACHER: KindStats = KindStats { life: 1100, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 3, sight_at_work: 1, look_every: Every::new(2), ghost_cast: Some(GhostCast { priority: 1, count: 3 }) };
 const SPY: KindStats = KindStats { life: 600, heal: Some(4), fight_damage: 60, rank: 1, pace: 1, fights: true, joins_melees: true, throws: false, sabotage: 7, sight: 0, sight_at_work: 0, look_every: Every::new(4), ghost_cast: Some(GhostCast { priority: 1, count: 3 }) };
 const FIREWARRIOR: KindStats = KindStats { life: 700, heal: Some(6), fight_damage: 60, rank: 3, pace: 2, fights: true, joins_melees: false, throws: true, sabotage: 16, sight: 11, sight_at_work: 5, look_every: Every::new(4), ghost_cast: Some(GhostCast { priority: 1, count: 3 }) };
-const WILDMAN: KindStats = KindStats { life: 1000, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4), ghost_cast: None };
+const WILDMAN: KindStats = KindStats { life: 32, heal: None, fight_damage: 0, rank: 0, pace: 1, fights: false, joins_melees: false, throws: false, sabotage: 0, sight: 0, sight_at_work: 0, look_every: Every::new(4), ghost_cast: None };
 /// `LIFE_AOD` (10 000, exe-confirmed). Never heals (TODO.md "Health"), never fights the ordinary way (its own
 /// grab/carry/release and angel-vs-angel exchange run entirely through `GameMap::tend_angels_of_death`, bypassing
 /// `attack`/`melee` — `fights: false` here, together with it never being `UnitKind::Wildman`, is what already
@@ -127,7 +127,7 @@ mod tests {
                 ("Preacher", 1100, Some(4)),
                 ("Spy", 600, Some(4)),
                 ("Firewarrior", 700, Some(6)),
-                ("Wildman", 1000, None),
+                ("Wildman", 32, None),
             ]
         );
     }

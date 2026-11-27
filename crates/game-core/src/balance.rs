@@ -89,8 +89,8 @@ pub struct Income {
 
 /// Per-kind life (hit points; `kind_stats.rs`'s own `KindStats::life`, constants.md "Units" `LIFE_<P>"):
 /// our own defaults already are the traced real numbers, so this only matters for a modded install with
-/// different ones. No entry for a wildman, which "has none, a brave's stands in" (`kind_stats.rs`) - it
-/// always mirrors `brave` here too, even after a real file overrides it. The Angel of Death's is `LIFE_AOD`
+/// different ones. No entry for a wildman: no `LIFE_` constant names it, its 32 is the exe's own table
+/// (pop3-rev-analysis.md "Starting and maximum life"), `KindStats::life` whatever the file. The Angel of Death's is `LIFE_AOD`
 /// (spells.md "Original balance"), 10 000 like the exe's own per-type table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Units {
@@ -109,7 +109,8 @@ impl Units {
     pub fn life(&self, kind: UnitKind) -> u16 {
         match kind {
             UnitKind::Shaman => self.shaman,
-            UnitKind::Brave | UnitKind::Wildman => self.brave,
+            UnitKind::Brave => self.brave,
+            UnitKind::Wildman => UnitKind::Wildman.stats().life,
             UnitKind::Warrior => self.warrior,
             UnitKind::Preacher => self.preacher,
             UnitKind::Spy => self.spy,
@@ -289,9 +290,8 @@ mod tests {
     }
 
     #[test]
-    fn units_life_mirrors_brave_for_a_wildman() {
-        let units = Balance::ours().units;
-        assert_eq!(units.life(UnitKind::Wildman), units.life(UnitKind::Brave));
+    fn a_wildman_s_life_is_its_own_32() {
+        assert_eq!(Balance::ours().units.life(UnitKind::Wildman), 32);
     }
 
     #[test]
@@ -315,7 +315,7 @@ mod tests {
         balance.apply_constants(&raw);
         assert_eq!(balance.units.brave, 4242, "overridden by the file");
         assert_eq!(balance.units.warrior, Balance::ours().units.warrior, "no LIFE_WARRIOR key: default kept");
-        assert_eq!(balance.units.life(UnitKind::Wildman), 4242, "mirrors the now-overridden brave");
+        assert_eq!(balance.units.life(UnitKind::Wildman), 32, "no file line names it");
     }
 
     #[test]

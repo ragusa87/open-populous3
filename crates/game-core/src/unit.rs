@@ -2808,9 +2808,9 @@ mod tests {
     fn each_kind_heals_its_own_amount() {
         let (s, _) = shaman_at((10, 10));
         let healed = |kind: UnitKind| {
-            let mut u = Unit { kind, health: Health::new(100, kind.max_health()), ..s.clone() };
+            let mut u = Unit { kind, health: Health::new(10, kind.max_health()), ..s.clone() };
             u.heal();
-            u.health.current() - 100
+            u.health.current() - 10
         };
         assert_eq!(UnitKind::ALL.map(healed), [32, 4, 6, 4, 4, 6, 0]);
         let mut full = s.clone();

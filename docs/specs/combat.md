@@ -16,7 +16,7 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 | preacher | 1100 | 4 |
 | spy | 600 | 4 |
 | firewarrior | 700 | 6 |
-| wildman | 1000 (guess; the original's is 32, TODO.md) | never |
+| wildman | 32 (the exe's own, no `LIFE_` constant: pop3-rev-analysis.md "Starting and maximum life") | never |
 
 - Everyone heals on every eighth turn of the game (`unit::HEAL_EVERY`, phase 0: the same turn for all) [exe],
   whatever it does, fighting included; not in the air, drowning, stranded or dead.
