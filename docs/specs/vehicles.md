@@ -7,8 +7,12 @@ numbers are guesses.
 ## The object (`Vehicle`, done)
 - Kept in `GameMap::vehicles`, a `Registry<Vehicle>` (typed `VehicleId`, the map's id counter).
 - `VehicleKind`: Boat or Balloon. Seats 5 / 2, a hard limit (vehicle table +0x8). Mobility `Sail` (water cells only,
-  all four corners at sea level: a shore cell with land in it is land for a boat) / `Fly` (anywhere, walls ignored). Speed 96 / 80 world
-  units per turn [ours, a guess].
+  all four corners at sea level: a shore cell with land in it is land for a boat) / `Fly` (anywhere, walls ignored). Cruise speed 110 world
+  units per turn for both (`CRUISE`). Speed now (`Vehicle::speed`, `next_speed`): while its driver moves, up from
+  at least 10 by ×56/32 a turn to cruise; while its driver is stopped (`driver_stopped`: a boat whose driver throws
+  fire), down by ×22/32 a turn (1 below 6), standing still once at 1; 0 when not moving ("Driving: the driver is
+  only a moving/stopped switch" [exe]). The original then parks at the next cell centre and sets off again on its
+  driver's next move; ours holds still, still bound for its destination [ours].
 - State: `Parked`, `Moving { to }`, `Sinking`, `Rising`, `Stranded` (the exe's states 1-8, without the drift to a
   resting place, state 7, and the whirlwind's spin, state 9: TODO.md).
 - `heading` (an `angle::Angle`, from +x towards +z) follows the way it moves; the sinking pitch and the stranded
@@ -28,7 +32,7 @@ numbers are guesses.
   560 over a tree, a totem head, a fire, a reincarnation pillar or a portal as over a building (not 450), 200
   elsewhere (plants, wood piles, rocks: 200); a linear climb of at most 22 up / 16 down a turn with no easing and
   no `CLEARANCE` floor; and every balloon bobs every turn (a 32-turn cycle, 28 units peak to peak when parked,
-  ±4 around its target while moving). Its speed is 110 (ours 80), the same as a boat's (ours 96).
+  ±4 around its target while moving). Its speed is 110, the same as a boat's (done).
 
 ## Parking and drifting (done, improvised)
 - One vehicle a cell: a vehicle sent where another stands or is going stops in the nearest free cell it reaches

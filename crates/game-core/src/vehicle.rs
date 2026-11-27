@@ -66,6 +66,12 @@ pub const UNLOAD_REACH: u16 = 1024;
 /// this speed ("Parking and the shore": 64 turns, speed 8).
 pub const DRIFT_EVERY: Every = Every::new(64);
 pub const DRIFT_SPEED: u16 = 8;
+/// Cruise speed of both kinds ("Driving: the driver is only a moving/stopped switch" [exe]).
+pub const CRUISE: u16 = 110;
+/// Setting off or speeding up, a turn: `max(speed, ACCEL_FROM) × 56/32`, up to `CRUISE` [exe, same section].
+pub const ACCEL_FROM: u16 = 10;
+/// Its driver stopped, a turn: `speed × 22/32`, 1 below `DECEL_FLOOR`; it stops once at 1 or less [exe, same].
+pub const DECEL_FLOOR: u16 = 6;
 /// Work for one vehicle, once its wood is there: each crew member inside adds 1 a turn (a guess: 100 s alone, 25 s
 /// with a full crew).
 pub const LAUNCH_WORK: u16 = 1200;
@@ -120,12 +126,10 @@ impl VehicleKind {
         }
     }
 
-    /// World units per turn (a guess: a little faster than people walk).
+    /// Cruise speed, world units per turn: 110 for both (pop3-rev-analysis.md "Driving: the driver is only a
+    /// moving/stopped switch", the vehicle profile's +0x4).
     pub fn speed(self) -> u16 {
-        match self {
-            VehicleKind::Boat => 96,
-            VehicleKind::Balloon => 80,
-        }
+        CRUISE
     }
 
     /// The vehicle a hut of `kind` makes, None for other buildings.
@@ -243,15 +247,18 @@ pub struct Vehicle {
     route: Vec<(u16, u16)>,
     /// Ground revision the route was planned on; None: plan on its next turn.
     planned_on: Option<(u32, u32)>,
-    /// A passenger is throwing fire this turn: it goes at half speed (`speed_now`).
-    pub slowed: bool,
+    /// World units it moves this turn (`next_speed`), 0 when not moving.
+    pub speed: u16,
+    /// Its driver (the first passenger) is stopped: a boat's driver throwing fire (its own speed set to 0 aboard a
+    /// boat, only halved in a balloon), so the vehicle slows down and stops ("Driving" [exe]).
+    pub driver_stopped: bool,
 }
 
 impl Vehicle {
     /// A new, empty vehicle parked at `at`.
     pub fn new(kind: VehicleKind, owner: impl Into<Owner>, (x, z): (u16, u16), heading: Angle) -> Self {
         let owner = owner.into();
-        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, was_at: None, route: Vec::new(), planned_on: None, slowed: false }
+        Vehicle { kind, owner, x, z, heading, health: Health::full(LIFE), state: State::Parked, passengers: Vec::new(), wait: Countdown::new(Ticks::ZERO), float: None, was_at: None, route: Vec::new(), planned_on: None, speed: 0, driver_stopped: false }
     }
 
     pub fn cell(&self) -> (i32, i32) {
@@ -264,12 +271,6 @@ impl Vehicle {
     }
 
     /// Seats nobody sits in.
-    /// How fast it goes this turn: half its speed while a passenger throws fire ("Firewarrior fire" [exe]: the
-    /// thrower's speed is halved aboard; that this slows the vehicle is ours).
-    pub fn speed_now(&self) -> u16 {
-        if self.slowed { self.kind.speed() / 2 } else { self.kind.speed() }
-    }
-
     pub fn free_seats(&self) -> u8 {
         self.kind.seats().saturating_sub(self.passengers.len() as u8)
     }
@@ -376,9 +377,18 @@ impl Vehicle {
             self.health.heal(LIFE);
         }
         match self.state {
-            State::Moving { to } if self.wait.tick() => self.travel(to, self.speed_now(), ground),
+            State::Moving { to } if self.wait.tick() => {
+                self.speed = next_speed(self.speed, !self.driver_stopped, self.kind.speed());
+                if !self.driver_stopped || self.speed > 1 {
+                    self.travel(to, self.speed, ground);
+                }
+            }
+            State::Moving { .. } => {}
             State::Drifting { to } => self.travel(to, DRIFT_SPEED, ground),
             _ => {}
+        }
+        if !matches!(self.state, State::Moving { .. }) {
+            self.speed = 0;
         }
         if self.kind == VehicleKind::Balloon {
             let (now, target) = (self.altitude(terrain), self.float_target(terrain, hover));
@@ -437,6 +447,18 @@ impl Vehicle {
                 self.state = State::Parked;
             }
         }
+    }
+}
+
+/// Its speed next turn from `speed`: towards `cruise` while its driver moves, down to a stop while it is stopped
+/// ("Driving: the driver is only a moving/stopped switch" [exe]). Stopped, the original parks at the next cell
+/// centre and sets off again on the driver's next move; ours holds still where it is, still moving to its
+/// destination, and speeds up again from there [ours].
+pub fn next_speed(speed: u16, driving: bool, cruise: u16) -> u16 {
+    match driving {
+        true => (speed.max(ACCEL_FROM) as u32 * 56 / 32).min(cruise as u32) as u16,
+        false if speed < DECEL_FLOOR => speed.min(1),
+        false => (speed as u32 * 22 / 32) as u16,
     }
 }
 
@@ -800,7 +822,7 @@ impl GameMap {
         let throwing = |p: UnitId| units.binary_search_by_key(&p, |u| u.id).ok().is_some_and(|i| matches!(units[i].action, crate::unit::Action::Throwing { .. }));
         for (id, v) in self.vehicles.iter_mut() {
             v.passengers.retain(|&p| aboard(id, p));
-            v.slowed = v.passengers.iter().any(|&p| throwing(p));
+            v.driver_stopped = v.kind == VehicleKind::Boat && v.passengers.first().is_some_and(|&p| throwing(p));
         }
         let vehicles = &self.vehicles;
         for u in self.units.iter_mut().filter(|u| u.aboard.is_some()) {
@@ -1059,6 +1081,55 @@ mod tests {
         assert_eq!((b.x, b.z), to);
         assert!(is_sea(&map.terrain, b.cell()) && by_the_shore(&map.terrain, b.cell()), "on the water by the island");
         assert!(people.iter().all(|&p| map.unit(p).is_some_and(|u| (u.x, u.z) == to && u.action == Action::Idle)));
+    }
+
+    #[test]
+    fn it_speeds_up_to_its_cruise_and_slows_to_a_stop_when_its_driver_stops() {
+        let up: Vec<u16> = std::iter::successors(Some(0), |&s| Some(next_speed(s, true, CRUISE))).take(7).collect();
+        assert_eq!(up, [0, 17, 29, 50, 87, 110, 110]);
+        let down: Vec<u16> = std::iter::successors(Some(CRUISE), |&s| Some(next_speed(s, false, CRUISE))).take(9).collect();
+        assert_eq!(down, [110, 75, 51, 35, 24, 16, 11, 7, 4]);
+        assert_eq!((next_speed(4, false, CRUISE), next_speed(1, false, CRUISE), next_speed(0, false, CRUISE)), (1, 1, 0));
+    }
+
+    /// Sends `v` far along the coast and runs it to its cruise speed, `driver` throwing fire from the turn it is up to speed.
+    fn throws_aboard(map: &mut GameMap, v: VehicleId, driver: UnitId, turns: u32) -> Vec<u16> {
+        map.vehicles.get_mut(v).unwrap().go(at((C + 10, C + 40)));
+        let target = map.spawn(TribeId::Red, UnitKind::Brave, at((C - 20, C))).id;
+        (0..BOARD_WAIT.get() + 6).for_each(|_| { map.tick(); });
+        assert_eq!(map.vehicle(v).unwrap().speed, CRUISE);
+        (0..turns)
+            .map(|_| {
+                let i = map.units.binary_search_by_key(&driver, |u| u.id).unwrap();
+                map.units[i].action = Action::Throwing { target: crate::unit::Target::Unit(target), left: Countdown::new(Ticks::new(100)) };
+                map.tick();
+                map.vehicle(v).unwrap().speed
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_boat_whose_driver_throws_slows_to_a_stop_a_passenger_throwing_never_slows_it() {
+        let mut map = coast();
+        let v = boat(&mut map, (C + 10, C + 10));
+        let people = aboard(&mut map, v, 2);
+        assert_eq!(throws_aboard(&mut map, v, people[1], 10), [CRUISE; 10], "a passenger's throw changes nothing");
+        let mut map = coast();
+        let v = boat(&mut map, (C + 10, C + 10));
+        let people = aboard(&mut map, v, 2);
+        let speeds = throws_aboard(&mut map, v, people[0], 12);
+        assert_eq!(speeds[..3], [75, 51, 35]);
+        let (x, z) = { let b = map.vehicle(v).unwrap(); (b.x, b.z) };
+        map.tick();
+        assert_eq!({ let b = map.vehicle(v).unwrap(); (b.x, b.z) }, (x, z), "stopped once at 1");
+    }
+
+    #[test]
+    fn a_balloon_whose_driver_throws_keeps_its_speed() {
+        let mut map = coast();
+        let v = map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at((C + 10, C + 10)), Angle::ZERO));
+        let people = aboard(&mut map, v, 1);
+        assert_eq!(throws_aboard(&mut map, v, people[0], 10), [CRUISE; 10]);
     }
 
     #[test]

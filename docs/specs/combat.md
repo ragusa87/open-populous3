@@ -273,11 +273,10 @@ join a melee on their own attack (they still fight when challenged).
   vehicle's, so a balloon throws further; in a building, its level), the bolts start at that height; in a finished
   drum tower (`GameMap::in_tower`) it reaches 4 cells more across, reloads in `RELOAD_IN_TOWER` (36) and its target
   takes `TARGET_DAMAGE_FROM_TOWER` (400). An attack order reaches a passenger (`order_aboard`); aboard or inside, a
-  target out of reach is waited for, it does not walk [ours: driving it towards the target is not done]. While a
-  passenger throws, its vehicle goes at half speed (`Vehicle::speed_now`) [ours, wrong: the original never
-  slows the vehicle by a passenger's speed - the driver's speed is only a moving/stopped switch, the thrower's is
-  halved only in a balloon and zeroed in a boat, so only a boat whose DRIVER throws stops; pop3-rev-analysis.md
-  "Driving: the driver is only a moving/stopped switch"]. Drawn pedalling aboard while it waits, its
+  target out of reach is waited for, it does not walk [ours: driving it towards the target is not done]. A passenger
+  throwing never slows its vehicle, except a boat's driver: its speed is zeroed aboard a boat (only halved in a
+  balloon), which the boat reads as "driver stopped" and slows to a stop (`Vehicle::driver_stopped`, vehicles.md;
+  pop3-rev-analysis.md "Driving: the driver is only a moving/stopped switch"). Drawn pedalling aboard while it waits, its
   throw pose while it throws.
 - Not yet: the line of fire (a building in the way), the smoke trail and
   the ground light, the shaman inside a building or vehicle taking half her
