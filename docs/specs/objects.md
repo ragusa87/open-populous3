@@ -89,13 +89,15 @@ settled trace - the "not verified against the game" caveat above still stands.
 | 4 | u16 | point count |
 | 6 | u8 | unknown |
 | 7 | u8 | animation record index (morph record of a morph base, set at load) |
-| 8..16 | | unknown |
+| 8 | | unknown |
+| 12 | u32 | drawing scale: a point is `scale / 65536` cells on each axis (160 for most buildings, 150 for the pyramid, pop3-rev-analysis.md "Model size") |
 | 16, 20 | i32 | faces `[start, end)`, **1-based** into `facs` |
 | 24, 28 | i32 | points `[start, end)`, **1-based** into `pnts` |
-| 32 | 6 x i16 | bounding box min xyz / max xyz, about 1.25x the points (selection margin?) |
+| 32 | 6 x i16 | bounding box min xyz / max xyz, the points × `scale / 128` (world units) |
 | 44..54 | | unknown |
 
-`pnts`: 6 bytes, `i16` x, y, z. **y is up**, 0 = ground; units are world units (512 per cell).
+`pnts`: 6 bytes, `i16` x, y, z. **y is up**, 0 = ground; units are `65536 / scale` per cell (the record's scale
+at offset 12: 410 per cell at 160, 437 at 150), not 512.
 
 Morph animation (`pop3_format::morph`): `objects/morph0-N.dat`, same bank number, 25 records of 368 bytes, little endian (unused
 records: base −1, count 0):
@@ -128,7 +130,8 @@ frame count byte; as shipped it holds two zero-terminated lists (107 107 102 103
 | 7 | u8 | flags: `0x20` = blended (`FACE_ALPHA`, see below); 0, 3, 6, 7 elsewhere, meaning unknown |
 | 8 | 4 x (i32 u, i32 v) | texel inside the tile, 16.16 fixed point, 0..32 |
 | 40 | 4 x u16 | point indices, 0-based within the object |
-| 48..60 | | per-point shade (?) and flags, unknown |
+| 48..58 | | per-point shade (?), unknown |
+| 59 | u8 | construction stages: bit `s` (0-3) = drawn at stage `s`, bit `4 + s` = drawn as plain wood (tile 250) at that stage; 0 = only once built (pop3-rev-analysis.md "Drawing a building by stage") |
 
 Faces are one-sided: a face is seen only from its front, where its points turn counter-clockwise (x, y up, z
 right-handed: the normal is `(p1 - p0) x (p2 - p0)`); from behind it is not drawn. A surface seen from both

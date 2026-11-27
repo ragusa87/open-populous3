@@ -6,7 +6,7 @@ says whether a spell applies at its target; `GameMap::apply` ignores a cast that
 | Spell | Effect |
 |---|---|
 | Land Bridge | aimed on the ground (`hud::spells::ground_spell`), within range, at land only (not open sea, `unit::is_sea`: the water on its way is raised); released like a blast 6 turns into her cast jump; starts at the caster's shaman as she stands when the command runs, or where it was aimed from on a god level (`GameMap::shaman_omni`: the ground under the bottom middle of the view). An effect (`land_bridge`, `EffectKind::LandBridge`): 4 height points wide (−1, 0, +1, +2 across the line), each moving every turn towards a straight slope between both ends' heights at cast (at least 90), `h += clamp(T − h, ±256) / (64 − turn)`, for 64 turns (`LAND_BRIDGE_MAX_CHANGE`, `LAND_BRIDGE_DURATION`): sea raised, hills in the way lowered. The editor's B brush is still the instant 1-wide line (min 32). While it builds, a tiny star twinkles at the centre of each cell with a corner not yet at its height (`sparkles::SparkleView`, from `Effect::reshaping`: every terrain effect gets them). Dev: `BRIDGE=x,z` (cells, from the player's shaman), `BRIDGE_TICKS=N` |
-| Flatten | aimed on the ground at the nearest height point (`flatten::nearest_point`), released 6 turns into the cast jump like a blast. An effect (`flatten`, `EffectKind::Flatten`): the 45 height points of a disc (within √13 of the target point, about 3.5 cells: the original's count) move each turn towards the target point's height at cast, `h += (T − h) / (15 − turn)`, for 15 turns (the original's length; its curve is not traced, ours lands on the last turn): hills cut, hollows and sea filled. Sparkles on each cell it is reshaping (`sparkles`). Buildings on it are not re-levelled or destroyed yet (TODO). Free in the sandboxes. The editor's T brush is still the instant radius 4. Dev: `FLATTEN=x,z` (height point, another tribe's), `FLATTEN_TICKS=N` |
+| Flatten | aimed on the ground at the nearest height point (`flatten::nearest_point`), released 6 turns into the cast jump like a blast. An effect (`flatten`, `EffectKind::Flatten`): the 45 height points of a disc (within √13 of the target point, about 3.5 cells: the original's count) move each turn towards the target point's height at cast, `h += (T − h) / (15 − turn)`, for 15 turns (the original's length and curve, pop3-rev-analysis.md "Flatten (effect state 31)"; the original centres the 45 points on the cast point's cell corner rounded down, aims at the ground height at the exact point, and starts the outer points 2-6 turns late behind a growing radius - ours starts all at once): hills cut, hollows and sea filled. Sparkles on each cell it is reshaping (`sparkles`). Buildings on it are not re-levelled or destroyed yet (TODO). Free in the sandboxes. The editor's T brush is still the instant radius 4. Dev: `FLATTEN=x,z` (height point, another tribe's), `FLATTEN_TICKS=N` |
 | Erode | aimed on the ground (`hud::spells::ground_spell`), released like a blast. An effect (`erode`, `EffectKind::Erode`, `DURATION` 64 turns): `PASSES` (63) falloff-brush passes (the existing `Heightmap::raise` brush, radius 4), one per turn except the last (which only ends it), each centred `-4..+3` cells from the cast point on both axes (`map::Lcg`, two draws, `& 7 - 4`) — our own approximation of the original's per-cell steepest-descent slope pick (pop3-rev-analysis.md "Erosion passes"), confirmed sufficient rather than a new hydraulic simulation (docs/plans/spells.md "Erosion": "just a slower/deeper/longer-duration version of the falloff pattern already there"). Floored at sea level by `raise`'s own clamp, like every other terrain spell. Sparkles while passes remain, dropped once a cell is already at sea level (`sparkles`, `Effect::reshaping`). The editor's F brush is still the instant radius 4, -120 drop. Dev: `ERODE=x,z` (height point, another tribe's), `ERODE_TICKS=N` |
 | Raise | editor brush, radius 3 +64 |
 | Teleport | sandbox only (the original names a spell model 21 teleport, see below, effect unknown): the caster's living shaman does her cast jump, then is at the target (`Unit::cast_teleport`); only onto ground she can walk (`Mobility::Walk`: no sea, no cliff), checked when cast and again when she lands (she stays if it no longer is); another order during the jump cancels it; she lands falling from a cell up (units.md "Landing") |
@@ -67,10 +67,12 @@ shaman" — left deliberately unchanged, not traced either way: `send_in.rs`/`en
 "not a shaman" exclusions, which already keep out every `UnitKind::Shaman` regardless of `statuses.ghost`
 (a ghost shaman shouldn't enter a building or board a vehicle either, as good a guess as the opposite). Own
 invisible and ghost people are already drawn translucent (units.md "Status markers"), an enemy's
-ghosts look like ordinary units to that enemy. Still open, not traced: the exact `CAST_RELEASE` delay for this
-spell specifically (this codebase applies one shared constant to every spell's cast-to-release flow already, so
-there is nothing to special-case without new evidence) and whether a ghost is *scored* any differently as an
-auto-attack target by an ordinary looker (distinct from what a ghost itself may attack). Dev: cast through the HUD
+ghosts look like ordinary units to that enemy. Traced since (pop3-rev-analysis.md "Ghost Army mechanics"): the
+cast uses the generic pipeline unchanged, `CAST_RELEASE` (6 turns) then a standard shot (1400 units per turn)
+from the shaman, then the 5-turn controller, so ours, which adds the controller the instant the cast releases,
+lacks only the shot flight (the generic "every spell flies as a shot" gap, TODO.md); and an ordinary looker
+finds and ranks a ghost exactly like a live unit, so nothing to change there. Not done: a ghost attacking a
+building does no damage to it in the original. Dev: cast through the HUD
 (`SpellKind::GhostArmy`). |
 
 To do: the other original spells, as traced in pop3-rev-analysis.md "Per spell" (any randomness through `map::Lcg`,
@@ -223,8 +225,9 @@ Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, us
 Delayed mana (`give_delayed`, `mana::Reservoir`, pop3-rev-analysis.md "Reservoir"): each gift adds to `held` and
 restarts a `RESERVOIR_DELAY` (1000 turns) wait; once it ends, `held` flows into `incoming` every turn at a rate
 fixed from the amount left when the release starts (`release_rate`: amount / 24, at least 1, below 36 000; 1500 up
-to 361 500; amount / 240 above). The 50-turn wait under a global flag is not modelled. Only the shaman-death share
-uses it so far; which path totem and discovery gifts take is not traced (they go through `add`).
+to 361 500; amount / 240 above). The original's 50-turn wait in multiplayer games is not modelled. Only the
+shaman-death share uses it so far; the original also sends mana discoveries (kind 6) through it, and nothing else
+(ours: discoveries go through `add`). See pop3-rev-analysis.md "Reservoir".
 
 Shaman death (`GameMap::shaman_died`, pop3-rev-analysis.md "Shaman death"): caught at the end of whatever tick
 kills her (melee, a spell, drowning, stranded, lava...) by comparing alive-before/alive-after, since `Unit::die`

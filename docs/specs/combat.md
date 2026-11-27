@@ -16,7 +16,7 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 | preacher | 1100 | 4 |
 | spy | 600 | 4 |
 | firewarrior | 700 | 6 |
-| wildman | 1000 (guess) | never |
+| wildman | 1000 (guess; the original's is 32, TODO.md) | never |
 
 - Everyone heals on every eighth turn of the game (`unit::HEAL_EVERY`, phase 0: the same turn for all) [exe],
   whatever it does, fighting included; not in the air, drowning, stranded or dead.
@@ -37,7 +37,7 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 - A blow hits `max(32, strength × life / max_life)`, × 3 when the attacker is bloodlusted (`combat::strength`) [exe];
   a bloodlusted defender then takes `>> BLOODLUST_HEALTH_SHIFT` (÷8) of that, and of a firewarrior's bolt too
   (`GameMap::damage`, independently of the attacker's own multiplier). Not yet: per-person maximum life
-  ("Measured": not always the kind's).
+  (the original rolls it at birth in [3/4, 1) of the kind's, pop3-rev-analysis.md "Starting and maximum life").
 - Move lengths in turns (`combat::move_turns`), × pace [exe, measured]:
 
 | Move | Followers | Shaman |
@@ -274,8 +274,10 @@ join a melee on their own attack (they still fight when challenged).
   drum tower (`GameMap::in_tower`) it reaches 4 cells more across, reloads in `RELOAD_IN_TOWER` (36) and its target
   takes `TARGET_DAMAGE_FROM_TOWER` (400). An attack order reaches a passenger (`order_aboard`); aboard or inside, a
   target out of reach is waited for, it does not walk [ours: driving it towards the target is not done]. While a
-  passenger throws, its vehicle goes at half speed (`Vehicle::speed_now`) [exe: the thrower's speed is halved
-  aboard; that this slows the vehicle is ours]. Drawn pedalling aboard while it waits, its
+  passenger throws, its vehicle goes at half speed (`Vehicle::speed_now`) [ours, wrong: the original never
+  slows the vehicle by a passenger's speed - the driver's speed is only a moving/stopped switch, the thrower's is
+  halved only in a balloon and zeroed in a boat, so only a boat whose DRIVER throws stops; pop3-rev-analysis.md
+  "Driving: the driver is only a moving/stopped switch"]. Drawn pedalling aboard while it waits, its
   throw pose while it throws.
 - Not yet: the line of fire (a building in the way), the smoke trail and
   the ground light, the shaman inside a building or vehicle taking half her

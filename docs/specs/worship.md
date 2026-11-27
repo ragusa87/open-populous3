@@ -26,7 +26,8 @@ Traced in full, pop3-rev-analysis.md "The gauge" ([exe]); implemented as describ
 Sandbox > Worship (`POP3_START=sandbox-worship`, `GameMap::sandbox_worship`): south of the player's site a
 neutral pyramid of knowledge teaching the temple, its door facing the shaman; north a row of totems, one of each
 look (`TotemKind::ALL`: totem, winged death totem with its bird, prayer totem, stone head, the three totem poles,
-since which one the levels' scenery 9 uses is not known), and 8 of the player's braves in front of them.
+the four of them the levels' scenery 9 actually use are the stone head, the stone totem, the winged death totem and
+one totem pole, picked by the trigger on the cell: pop3-rev-analysis.md "Scenery looks: plants and prayer heads"), and 8 of the player's braves in front of them.
 Totems (`game_core::totem`, client `totems.rs`): their original objects with animated flames, or stone blocks
 without the original files. The stone totem gives once (`occurrences` 1), to show it turning, sinking and gone;
 the others give again and again. Each asks for something else: one unit; the shaman with an
@@ -80,7 +81,9 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   across the face's direction, through the top of the pedestal (height 324, centre axis), by `6° * sin(2π t / 1.6 s)`
   (±6°, one nod every 1.6 s, smooth both ways). Done: `totems::split_head`, `nod_angle`; the generated stand-in
   is a pedestal block with a head block nodding the same way.
-- The other looks do not move (to check in the game).
+- The other looks do not move (to check in the game). The original [exe]: the stone head morphs between two
+  tilted key frames (objects 83, 84, 16 drawn frames a nod) only while its trigger is active; the totem pole swings
+  one part (188/189) only while prayed at; the winged death totem is static.
 - Gifts (`totem::gift`, from the trigger's targets; a thing a trigger targets is created when it fires, not at
   level load, pop3-rev-analysis.md "Fog of war" "Totems and other level hooks"): a spell (`Reward::Spell`, a "once"
   discovery `Reward::OneShot`: one more cast, `worship::one_more_shot`), a building discovery, mana
@@ -99,8 +102,9 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   totem) an unhandled effect (`map::sandbox_gift`). Dev: `BRAVES=totem:N`.
 - Loaded (done: `totem::totems_from_level`): every scenery 9 of a level becomes a `Totem` with `prayers`
   (`TriggerCount`), `shaman_only` (types 3 and 5), `summons_angel` (type 5) and `pray_time` from the prayer trigger on
-  its cell (`totem::triggers_on_cell`, shared with the vaults); drawn as the stone head (its real model is not
-  known).
+  its cell (`totem::triggers_on_cell`, shared with the vaults); drawn as the stone head. The original picks the look from that trigger [exe]: stone head for a
+  "once" discovery target, stone totem for a shaman-only trigger, winged death totem for type 5, a totem pole
+  for no discovery target (pop3-rev-analysis.md "Scenery looks: plants and prayer heads"; TODO.md).
 - Who may pray and how many are needed come from the level, per totem, from the trigger on its cell [player,
   files]: type 0 takes any of the tribe's units, followers and the shaman alike, each counting towards
   `TriggerCount`; type 3 takes only the shaman [player]. Type 5 takes only the shaman too, and when it fires an

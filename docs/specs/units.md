@@ -33,14 +33,14 @@
 |---|---|---|
 | Idle | default, arrival, Stop | stands (healing: see "Health" below) |
 | Walking { to } | `Order::MoveTo` | follows a path (see Pathfinding) at 53 units/tick on flat ground (1.24 cells/s) (slope over the next step: `slope_speed`, 1/256 factor `256 - grade*k/100` with k = 192 uphill and 128 downhill, clamped to 32..384, grade = height per cell: ~78% speed up the sandbox ramp, quarter speed up the steep hill, 1.5x down it, ground height bilinear `Heightmap::height_at`); target unreachable: the shaman stays Idle, other units are Stranded |
-| Stranded { to } | target unreachable (not the shaman); also a walker or an in-the-open attacker making less than `STUCK_MIN_PROGRESS` headway over `STUCK_WINDOW` (`Unit::stuck_watch`, `[ours]`; never an attacker within `WAITING_NEAR`, two cells, of its target: it waits its turn at a busy fight; a safety net - reported live as a unit standing still in the walking pose with no feedback, traced to `Action::Attacking`'s own `approach` having no fallback at all once its route comes back empty) | does not move, arms up, -`STRANDED_DAMAGE` (20) HP every `STRANDED_HURT_EVERY` (4 turns, at its own phase) until the terrain opens a path (walks again) or it dies - the original instead waits out an untimed grace period, then deals 56 life every 8 turns, pop3-rev-analysis.md "Stranded" (TODO.md) |
+| Stranded { to } | target unreachable (not the shaman); also a walker or an in-the-open attacker making less than `STUCK_MIN_PROGRESS` headway over `STUCK_WINDOW` (`Unit::stuck_watch`, `[ours]`; never an attacker within `WAITING_NEAR`, two cells, of its target: it waits its turn at a busy fight; a safety net - reported live as a unit standing still in the walking pose with no feedback, traced to `Action::Attacking`'s own `approach` having no fallback at all once its route comes back empty) | does not move, arms up, -`STRANDED_DAMAGE` (20) HP every `STRANDED_HURT_EVERY` (4 turns, at its own phase) until the terrain opens a path (walks again) or it dies - the original instead waits out a grace of 408 turns (human tribe) or 992 (computer), then deals 56 life every 8 turns while still healing, pop3-rev-analysis.md "Stranded" (TODO.md) |
 | Worshipping | `Order::Worship { site }` (a click on a vault of knowledge with her selected) | prays at the vault's door; see worship.md |
 | Casting { left } | `Order::Cast`, any spell cast | `CAST_TICKS` (10, the original's cast state) jump, then Idle (Teleport: then at the target, Landing); a book spell (Blast, Land Bridge) is held by her (`Unit::cast_spell`) and takes effect `CAST_RELEASE` (6) into the jump (`UnitEvent::Released`), lost if another order comes first (a fight does not cut it short: combat.md "Challenge"); without a shaman to jump it takes effect at once |
 | Landing | arriving from a teleport | appears `LANDING_DROP` (256, one cell) above the target and falls ("Physics"): no orders while in the air, Idle on touchdown, 5 ticks (0.4 s) later; drawn in the idle pose at its height; a puff of dust at touchdown (`units/dust.rs`) |
 | Chopping { tree, left } | `Order::CutTree`, `Order::FetchWood` (braves only) | walks to a free spot next to the tree, then `CHOP_TICKS` (20, 1.67 s, the original's countdown) of chopping, then the tree loses one size and the brave carries the piece |
 | Flattening { at, left } | assigned to a plan (`Order::Build`) | `JUMP_TICKS` jump on a footprint height point, which then moves towards the site's level (buildings.md "Construction"); drawn with the jump pose (original anim 12; the CC0 sheets: arms up) |
 | Entering { to } | `Unit::enter` at a building's door | straight to `to` inside, through its walls, then Idle inside (`Unit::inside`) |
-| Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in (hammer pose: the axe swing, anim 11, until the original hammering anim is found) |
+| Building { left } | inside a site with wood on its pile | `BUILD_TICKS` building one piece in (hammer pose: the axe swing, anim 11, which is also the original's hammering: pop3-rev-analysis.md "The hammering pose") |
 | Hammering | inside a site under construction with nothing to build yet, or by a plan with no height point free | until wood comes, a point frees up or it is built; counts as free (`Unit::is_free`) |
 | Holding { left } | idle with a piece of wood | stands holding it for `HOLD_TICKS` (3 s), then puts it down where he stands; any order (chained or direct) takes over and keeps the piece |
 | Drowning { sunk } | ground under her becomes open sea (on the ground), or landing there after a fall | sinks `DROWN_SINK` (16) a tick, dead at `DROWN_DEPTH` (256): 16 turns whatever its health or kind (pop3-rev-analysis.md "Drowning"); no orders; back to Idle if land returns. Drawn sinking from the sea's surface as drawn (`ground_material::drawn_water_lift`: the `watdisp` ripple height the sea's vertices are raised by, pop3-rev-analysis.md "Water rendering (watdisp.dat)", fading out within 3 cells of land), `units::drawn_sink`, hidden once wholly under (`units::submerged`: the sprite, pulled towards the eye, is never hidden by the water itself) and while dying where it drowned; its climbing spirit rises from the surface. Faces the camera while drowning (`art::shown_dir`). A splash where it goes in, and where its drowned spirit rises; one killed in the air and landing dead in the sea splashes on landing instead, its spirit rising without one (`[ours]`, user-directed; the trace's landing routine splashes on water): its own 16-tick effect (`game_core::splash`, pop3-rev-analysis.md "Drowning splash"), independent of the unit after, gone at once on land; drawn (`splash.rs` [client]) as the original's animation (sprites 1304-1319) with the original files, our own foam, droplets and rings without (`[ours]`). Its two sounds (0x11, 0x2C) wait for audio |
@@ -263,7 +263,8 @@ targets. Explicit orders still go by the real tribe: a player can always attack 
 - Colours (`Unit::shown_owner`): its owner sees it blink between its real and disguise colour every 2 turns while
   it settles, then the disguise; every other tribe sees its real colour until it settles, then the disguise.
 - Look (`Unit::shown_kind`): once settled every other tribe sees a brave (its art, poses and idle flavor), its
-  owner still a spy; while settling, or undisguised, a spy for all.
+  owner still a spy; while settling, or undisguised, a spy for all. (The original: every other tribe always sees a
+  brave, disguised or not - TODO.md "Spies".)
 
 **Reveal** (`Unit::reveal`), and nothing else ends a disguise:
 - an attack order aimed at it, the turn the attack starts (`GameMap::go_attack`, spotting's own too);
@@ -279,7 +280,8 @@ targets. Explicit orders still go by the real tribe: a player can always attack 
 **Arson** (`Order::Arson { building }`, `Action::Arson`, arson.rs): the computer's own order, and what a spy's
 attack on an enemy building does (user-confirmed in play: it never hacks at the door like other fighters; this
 contradicts pop3-rev-analysis.md's "not player-reachable", the play observation wins). The spy walks to the middle
-of the building's wall nearest to it, never the door's wall (`GameMap::arson_spot`, user-confirmed: the original
+of the building's wall nearest to it, never the door's wall (the original: always the back wall, opposite the
+door - TODO.md "Spies"; `GameMap::arson_spot`, user-confirmed: the original
 stands on a flagged wall cell of the footprint, ours just outside it; the door only when no wall side is free),
 crouches facing it the whole time (the original's turn away while the firebrand flies is dropped: user-confirmed),
 aims 10 turns, winds up 24 with the firebrand, then leaves it burning on the middle of that
@@ -290,17 +292,19 @@ still crouched. Pose: `Pose::SetFire`, anim 17 with the original files, its fram
 down) over the aim, then only the crouched 5-10 looping (11 stands back up: never shown, user-confirmed); our art
 kneels. A genuine member of the tribe
 it passes as standing at the door while it aims or winds up unmasks it and ends the order; once it burns, a roll
-(`NOTICED_PERCENT`, 25 `[guess]`: the original's table was never read) may unmask it. A fight only interrupts
+(`NOTICED_PERCENT`, 25 `[guess]`; the original: the building owner's `SPY_DISCOVER_CHANCE`, rolled only for a
+human player's spy - TODO.md "Spies") may unmask it. A fight only interrupts
 it: back on its feet, it starts over, until the building burns or is gone, it dies, or gets another order.
 The original's wood-pile arson (kind 13) is never issued there: not implemented.
 
 **Computer tribes** (ai_spy.rs): with `STATE_SABOTAGE` on, every 64 turns, idle spies up to `MAX_SPY_ATTACKS` out
-at once (`[guess]` reading of the attribute) are each redisguised as a target's tribe and sent to burn the first
-not-burning building of a worklist: the 10 enemy buildings nearest the tribe's base (`[ours]`, the original's
-filling is not traced). Every 32 turns (`[guess]`; `SPY_CHECK_FREQUENCY` not read, its unit unknown) each computer
+at once (the original's reading too: concurrent sabotage raids, one spy each) are each redisguised as a target's tribe and sent to burn the first
+not-burning building of a worklist: the 10 enemy buildings nearest the tribe's base (`[ours]`; the original's raid targets a random
+building of a random enemy tribe - TODO.md "Spies"). Every 32 turns (`[guess]`; not `SPY_CHECK_FREQUENCY`, which is an attack party's re-disguise period) each computer
 tribe looks for spies passing as its own anywhere: caught by a `SPY_DISCOVER_CHANCE` percent roll (45 by default,
 the live value) or for standing idle longer than `ENEMY_SPY_MAX_STAND` turns (255), unmasking every spy passing as
-it within 3 cells (`[guess]`). A human tribe never runs this check.
+it within 3 cells (`[guess]`; the original: the 3x3 cells around the spy, and only for spies inside the tribe's
+settlement area - TODO.md "Spies"). A human tribe never runs this check.
 
 ## Wood (done: braves only)
 - A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).
@@ -331,6 +335,8 @@ Idle followers (braves, warriors, firewarriors, spies, preachers) whose shaman (
 and idle or walking pray facing her: the Pray pose (original anim 8, kneeling, arms going up and down; the CC0
 pray sheet), turned towards her (`octant`), following her as she walks by. Drawn only: in the simulation they stay
 Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the shaman never do it; casting, praying, drowning or dying, she gets no worship. Nobody aboard a vehicle worships (they pedal), and nobody worships her while she is aboard one.
+The original differs (pop3-rev-analysis.md "Worshipping the shaman", TODO.md): her 3 x 3 cells, whatever she does,
+one new worshipper per 8 turns, kept within 4.6 cells.
 
 ## Standing slots (done: `game_core::slots`)
 - Each cell holds 3 x 3 standing spots (`PER_CELL`, about a third of a cell apart: a unit's width).
@@ -345,7 +351,8 @@ Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the 
   nearest free spot (`GameMap::tick`).
 - Standing idle (`game_core::idle`, pop3-rev-analysis.md "Bored poses"): a follower (not a wildman) idle on the
   ground with nothing lined up remembers where it stands; every 32 turns on its own phase (its id) a roll gives a
-  shuffle at 13/32 (face one of 8 ways, step `SHUFFLE_STEP` off that spot, an eighth of a cell, our guess kept
+  shuffle at 13/32 (face one of 8 ways, step `SHUFFLE_STEP` off that spot, an eighth of a cell - the original takes
+  no step, it turns ±135° on the spot and keeps that facing, pop3-rev-analysis.md "Bored poses", TODO.md -, kept
   inside its standing spot, then stand; 4-31 turns in all, still `Action::Idle`) or a bored pose at 3/64 (the
   client's `units::art::bored`, which wins over the shuffle). Anything but Idle forgets the spot.
 

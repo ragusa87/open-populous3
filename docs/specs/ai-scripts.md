@@ -657,7 +657,9 @@ confirmed as task 24").
   alternate two of them.
 - `SET_BASE_MARKER m` sets the centre of the base, and `SET_BASE_RADIUS r` its radius (for wildmen
   conversion). Bullfrog always calls `RESET_BASE_MARKER` (?) just before `SET_BASE_MARKER`.
-  `SET_DEFENCE_RADIUS r` is unknown (?).
+  `SET_DEFENCE_RADIUS r` sets the size of the tribe's settlement area, a disc around each of its buildings: r = 5, 7,
+  9 give radius 4, 6, 8 cells, anything else (and the default) 10 (pop3-rev-analysis.md "What un-disguises a spy";
+  it bounds the spy-discovery check and the computer's random destinations).
 - `COUNT_PEOPLE_IN_MARKER team|COUNT_WILD marker radius $v` (144 uses) and `IS_SHAMAN_IN_AREA team marker
   radius $v`. **Implemented** (`ai_script.rs`'s `do_call`), over `GameMap::units` within `radius` cells of the
   marker's own cell; `COUNT_WILD` matches by `UnitKind::Wildman`, not by owner (`attack.rs`'s own wildman
@@ -857,7 +859,7 @@ is a pure runtime switch, independent of whether a shaman/site thing exists).
 | `SHAMEN_BLAST` | the shaman's blast damage: 0, 32, 64, 128 seen; at 0 a shaman dies in 6-8 blasts, at 256 in 2-3 |
 | `USE_PREACHER_FOR_DEFENCE` | != 0 needed by `STATE_DEFEND_BASE` |
 | `DONT_GROUP_AT_DT` | > 0: no gathering before an attack |
-| `ENEMY_SPY_MAX_STAND`, `SPY_CHECK_FREQUENCY`, `SPY_DISCOVER_CHANCE`, `MAX_SPY_ATTACKS` | spy handling (128 or 255 for the first). Read by `ai_spy.rs` (units.md "Spies"): idle turns before a spy passing as the tribe is caught for sure, catch percent per check, spies out setting fires at once (`[guess]` readings); `SPY_CHECK_FREQUENCY` not read |
+| `ENEMY_SPY_MAX_STAND`, `SPY_CHECK_FREQUENCY`, `SPY_DISCOVER_CHANCE`, `MAX_SPY_ATTACKS` | spy handling (128 or 255 for the first). Read by `ai_spy.rs` (units.md "Spies"): idle turns before a spy passing as the tribe is caught for sure, catch percent per check (also the post-arson notice roll against a human's spy), sabotage raids (one spy each) at once; `SPY_CHECK_FREQUENCY` F: spies marching with an attack re-disguise as the attacked tribe every 4F runs of the attack task, 0 = never (pop3-rev-analysis.md "Arson", traced) |
 | `FIGHT_STOP_DISTANCE`, `GROUP_OPTION`, `COUNT_PREACH_DAMAGE`, `MAX_TRAIN_AT_ONCE` | ? (0/24/26, 0/2/3, 0/1, ?) |
 | `SPELL_DELAY`, `DONT_DELETE_USELESS_BOAT_HOUSE`, `BOAT_HOUSE_BROKEN`, `DONT_AUTO_TRAIN_PREACHERS`, `SPARE` | unused or rare |
 

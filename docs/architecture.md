@@ -47,7 +47,10 @@ crates/
 
 ## The tick
 `GameMap::tick` is the one main loop: one call is one turn of the original (12 per second, `time.rs`), and it ticks
-each kind of object in a fixed, written order. The original's order inside a turn is not known yet (TODO.md); ours:
+each kind of object in a fixed, written order. The original runs every unit of every kind in ONE interleaved pass
+(creation order, newest first), after the commands, the computer AI and the fights, and before the tribe recount,
+income, terrain recompute and spell charging (pop3-rev-analysis.md "Order of work inside a turn"). Ours keeps one
+list per kind, in this order:
 1. walls (`update_walls`), then trees (`Tree::tick`);
 2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), Blast's
    own fireball shots in flight (`tend_fireballs`, spells.md "Blast"), then effects (`tend_effects`): before

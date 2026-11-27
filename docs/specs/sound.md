@@ -456,8 +456,8 @@ Correction: pop3-rev-analysis.md "Statuses" reads sound `0xCF` as a person's low
 | 0x6E | Zoom_out [147] | 0xFF | 63 | - | 'Zoom_out' click: UI toggle button when tribe+0x93D bit 0x80 is clear; queues tribe_cmd 0x5F(1). |
 | 0x6F | Zoom_in [148] | 0xFF | 63 | - | 'Zoom_in' click: same toggle with the bit set; queues tribe_cmd 0x5F(0). |
 | 0x70 | discosky [169] | 0xFF | 127 | - | Discovery claimed (UI, 'discosky'): a person reaches a discovery, or a trigger hands a discovery straight to a tribe. |
-| 0x71 | discopop [168] | 0xFF | 127 | - | Discovery cinematic starts ('discopop'): spell discovery, or discovery kind 0xB. |
-| 0x72 | discoend [167] | 0xFF | 127 | - | Spell/swirl cinematic reaches its arrival stage ('discoend'); stopped when the cinematic ends. |
+| 0x71 | discopop [168] | 0xFF | 127 | - | Discovery cinematic starts ('discopop'): a spell discovery (the spell cinematic's only sound), or any kind other than building or spell (the sparkle swirl). |
+| 0x72 | discoend [167] | 0xFF | 127 | - | The swirl cinematic reaches its arrival stage ('discoend'), stopped when it ends: mana discoveries and the shaman-death soul swirl; never a spell or building discovery. |
 | 0x73 | Sel_spel [145] | 0xFF | 63 | - | GUI click 'Sel_spel': a GUI-dialog widget of kind 9-0x21 activated (spell-panel buttons). |
 | 0x74 | Sv_dance..Sv_dance2 [225-226] | 0x80 | 100 | - | ORPHAN: shout slot for spell type 0 (none) of the local shaman table; never reached. |
 | 0x75 | Sv_blast..Sv_blast2 [219-220] | 0x80 | 100 | - | Local player shaman cast shout for spell type 1 (burn): 0x74 + spell type, played when the spell is launched, on the shaman, or as a 2D sound if the tribe has no shaman and flag +0x93F bit 8 is set. Not replayed while another 0x74-0x86 shout is still playing on the same shaman. |
@@ -545,8 +545,8 @@ Correction: pop3-rev-analysis.md "Statuses" reads sound `0xCF` as a person's low
 | 0xCA | amb_hellsea01..amb_hellsea05 [413-417] | 0x40 | 32 | - | Ambience bed, hell theme: sea ('amb_hellsea'). |
 | 0xCB | disco_bldg_path [435] | 0xFF | 127 | - | Building-discovery cinematic starts ('disco_bldg_path'), layered with 0xCC. |
 | 0xCC | disco_bldg_pop [438] | 0xFF | 127 | - | Building-discovery cinematic starts ('disco_bldg_pop'). |
-| 0xCD | disco_bldg_end [436] | 0xFF | 127 | - | Building-discovery cinematic final stage ('disco_bldg_end'). |
-| 0xCE | disco_bldg_circ [437] | 0xFF | 127 | - | Building-discovery cinematic circling stage ('disco_bldg_circ'); stopped after 12 stages. |
+| 0xCD | disco_bldg_end [436] | 0xFF | 127 | - | Building-discovery cinematic, flight to the panel (its last stage) starts ('disco_bldg_end'); not stopped in practice. |
+| 0xCE | disco_bldg_circ [437] | 0xFF | 127 | - | Building-discovery cinematic, from its first stage ('disco_bldg_circ'); stopped 24 frames into the flight to the panel. |
 | 0xCF | tweets [439] | 0x80 | 40 | - | Bird tweets on a building drawn on screen with flags_3 +0x14 bit 0x1000. The bit is set by hut growth and mana distribution, so plausibly a 'contented hut'. Stopped when the bit clears. |
 | 0xD0 | swirl [440] | 0xFF | 127 | - | Soul swirl ('swirl'): the local player killed an enemy shaman. |
 | 0xD1 | badswirl [451] | 0xFF | 127 | - | Bad swirl ('badswirl'): the local player's own shaman died. |

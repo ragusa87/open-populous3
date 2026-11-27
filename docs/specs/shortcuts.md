@@ -29,13 +29,13 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | F1 | encyclopedia | - |
 | Enter | world view / normal view | toggles aerial view |
 | Shift+Enter | quick toggle world / normal view | - |
-| Space | skip the level fly-by | same (if one is playing and interruptible); looks at the shaman otherwise, in dev mode |
+| Space | in order: turn the held plan, skip the level fly-by, level status once won or lost, camera to the combat alert ([exe] pop3-rev-analysis.md "Player input: the keymap and HUD clicks") | same (if one is playing and interruptible); looks at the shaman otherwise, in dev mode |
 | S | level status | camera back (WASD) |
 | L | toggle the commanded unit ("commandee") | - |
 | `>` | camera to the shaman | - (Space) |
 | H | camera to the reincarnation site | same |
 | F8 / F9 | quick load / quick save; F9 resynchronises in multiplayer | - |
-| M | in-game chat | editor: marks the land bridge start |
+| M | in-game chat (multiplayer): an 80-character line and a toggle per other tribe plus "All" for its recipients | editor: marks the land bridge start |
 | Alt+C | screenshot | - |
 | Scroll Lock | redraws a corrupted palette | - |
 
@@ -60,7 +60,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Alt + 1-6 | camera to group | - |
 | Shift+Backspace | select the previous group | - |
 | Insert / Home / PgUp | buildings / spells / followers panel | - / camera tilt / zoom (Ctrl) and next level |
-| Right click on anything | query it | deselects (hover shows tooltips, tooltips.md) |
+| Right click on anything | query it (stays open while held, until the cursor leaves the thing) | deselects (hover shows tooltips, tooltips.md) |
 
 ## Followers
 | Input | Original | Ours |
@@ -76,7 +76,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Ctrl + left click after patrol points | hold the orders | - |
 | N | release the held followers | same |
 | G (with followers) / G | guard the shaman / stop guarding | same, Shift+G (G alone is the cell grid toggle in dev mode) |
-| Ctrl + left click on a follower icon | select 5 of that type | - |
+| Ctrl + left click on a follower icon | select 5 of that type (the 5 nearest the camera not yet selected; [exe] pop3-rev-analysis.md "Followers panel icons") | - |
 | Shift + left click on a follower icon | select all of that type, spies included | - |
 | Left click on an enemy tribe icon (spy selected) | the spy disguises as that tribe | - |
 | Left click on a vehicle (with followers) | board it | - |
@@ -86,7 +86,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Input | Original | Ours |
 |---|---|---|
 | Left click (plan held) | place the plan | same |
-| Ctrl + left click (plan held) | place several plans | - |
+| Ctrl + left click (plan held) | place several plans (Alt too; a plain click stops holding the plan, walls excepted) | - |
 | Space (plan held) | rotate the plan | same |
 | Shift + right click on a plan, guard post or swamp | remove it | plan not flat yet, camp fire |
 | Shift + left click on a building | one follower comes out | same (the player's own building, its lowest-id occupant, regardless of the current selection; `Command::Eject`) |

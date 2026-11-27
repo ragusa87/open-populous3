@@ -403,7 +403,8 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   0.3 cell past the walkable edge and rounds the corners. Ground there, even at height 0, takes the lowest land
   row. `walkable_cells`'s own render-only sea test (`terrain_texture::looks_like_sea`) has since diverged slightly
   from `game_core::unit::is_sea` itself - see TODO.md "Terrain" ("Sea level"): a cell at a very low but nonzero
-  height now also reads as "sea" for this one purpose (height <= `VISUAL_SEA_HEIGHT`, a guess), so it renders as
+  height now also reads as "sea" for this one purpose (height <= `VISUAL_SEA_HEIGHT`, a guess; the original has no
+  such threshold: a point is sea when it and its 8 neighbours are at 0, pop3-rev-analysis.md "Sea, shore and land"), so it renders as
   water instead of through `land_colour`'s own `cliff` remap, while staying exactly as walkable as before for
   everything gameplay (pathing, drowning, building placement all still read `is_sea` directly, untouched).
   **Fixed 2026-10-23**: `fragment`'s branch on `COAST_THRESHOLD` used to snap instantly between `water_colour`

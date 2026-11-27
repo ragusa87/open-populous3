@@ -23,6 +23,12 @@ numbers are guesses.
   (`EASE`), at most `CLIMB_STEP` 32, at least `MIN_STEP` 4, so it speeds up and slows down on a curve, never past the
   height it heads for. The step and the distances are guesses. Drawn, its height glides between turns from where its
   last turn started (`Vehicle::was_at`), its people with it.
+  The original, traced since (pop3-rev-analysis.md "Balloon height, look-ahead and bobbing"), differs: moving, it
+  samples only 3 points ahead, at 2, 4 and 6 × its speed (220/440/660 at its cruise 110), not under itself;
+  560 over a tree, a totem head, a fire, a reincarnation pillar or a portal as over a building (not 450), 200
+  elsewhere (plants, wood piles, rocks: 200); a linear climb of at most 22 up / 16 down a turn with no easing and
+  no `CLEARANCE` floor; and every balloon bobs every turn (a 32-turn cycle, 28 units peak to peak when parked,
+  ±4 around its target while moving). Its speed is 110 (ours 80), the same as a boat's (ours 96).
 
 ## Parking and drifting (done, improvised)
 - One vehicle a cell: a vehicle sent where another stands or is going stops in the nearest free cell it reaches

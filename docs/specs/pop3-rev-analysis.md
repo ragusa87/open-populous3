@@ -18,6 +18,10 @@ so a live measurement may run on it with the addresses translated.
 ## Takeaways for the implementation
 - **12 turns per second** [exe, measured]: a fixed timestep of 83 ms. Every "turns" value below converts at that
   rate. Our simulation runs at the same rate: one tick is one turn (`game_core::time`).
+- **Life is rolled per person, and stranding is slow then steady** [exe, measured]: a new person's maximum and
+  starting life is a roll in [3/4, 1) of its type's `LIFE_` (file values at run time); wildmen 32, fixed. A
+  stranded person loses nothing for 34 s (human tribe) or 83 s (computer), then 56 life every 8 turns, still
+  healing meanwhile. See "Starting and maximum life" and "Stranded".
 - **Lockstep is the original design** [ghidra]. Orders are queued tribe commands applied on the network turn, with
   one global pseudo-random generator. Our `Command` + `map::Lcg` model (multiplayer.md) matches it.
 - **Everything is a unit** [ghidra]. People, buildings, scenery, shots, spells and invisible controllers share one
@@ -27,6 +31,12 @@ so a live measurement may run on it with the addresses translated.
 - **An order is a shared "command group", not a per-person copy** [exe]: selecting several units and giving one
   order makes them all point at one 10-byte record (kind, flags, target, a reference count) in a fixed array of
   800; a person just resolves and runs whichever group it currently points to. See "Command groups".
+- **One turn is one interleaved pass over every unit** [exe]: commands first (a click acts on a later turn), then
+  the computer AI, then fights' controllers, then every unit of every kind in creation order (newest first),
+  then the tribe recount and income, the terrain recompute, and the mana distribution near the very end. See
+  "Order of work inside a turn".
+- **Sea is a 3 × 3 rule, not a height threshold** [exe]: a point is sea only when it and its 8 neighbours are at
+  0; drawing, walking and drowning all use that same per-cell shape. See "Sea, shore and land".
 - **Mana is a per-tribe pipeline run every turn** [exe]: income every 16 turns, then spell charging first, the
   surplus banked, a delayed reservoir for gifts. See "Mana rules".
 - **Income is busy/idle per person**, from constants that `constant.dat` cannot change. It is not the
@@ -180,6 +190,24 @@ so a live measurement may run on it with the addresses translated.
   permanent discovery gets a "discovery marker" showing the reward's panel glyph (hfx 1056-1083) as a fixed
   billboard 1072 units over the vault's ground, with an animated glow (hfx 1417, white core, cycling colour
   fringe) 80 below it and a ground light. Both go the turn the vault fires. See "The reward icon over a vault".
+- **A granted building or spell flies to the panel** [exe]: a building's model bursts into its faces from the
+  vault's screen position, rebuilds in front of the camera (19 + 23 frames), turns (31), then peels face by face
+  onto its panel button; a spell's glyph flies to the screen centre at 8× and on to its button. Per drawn frame,
+  not per turn; the reward lands when it arrives. See "Discovery cinematic: the reward flies to the panel".
+- **A building under construction or damaged is its own mesh with faces switched per stage** [exe, measured]:
+  each face's byte 59 holds a "shown" and a "shown as wood" bit for each of the 4 stages; no separate scaffold, no
+  height cut. Damage puts a built building back on this drawing at its new stage. See "Drawing a building by
+  stage".
+- **One keymap drives every key and mouse click** [exe]: a static default table of (key or mouse button,
+  press/release, modifiers, condition, command); the first matching binding wins, so one key has a priority list
+  (Space: turn the held plan, skip the flyby, the status screen after a win or loss, else jump to the combat
+  alert). See "Player input: the keymap and HUD clicks".
+- **Scenery 9 is four different prayer places, picked by the trigger on its cell** [exe]: the stone head (a "once"
+  gift), the stone totem (shaman-only trigger), the winged-death totem (type 5: shaman only, brings an Angel of Death) or a totem pole (no
+  discovery gift), with their morph animations; plants 7 and 8 are single hfx sprites (2 and 3), and a tree's size
+  follows its wood. See "Scenery looks: plants and prayer heads" and "Tree size on screen".
+- **Hammering is the axe swing** [exe]: a building brave plays anim 11 (the chop animation) facing the site, with
+  sound 0x14, one swing cycle every 16-31 turns; there is no separate hammer animation. See "The hammering pose".
 
 ## Turns and timing [exe]
 ```text
@@ -198,6 +226,63 @@ loop:
   `turns_per_sec` 12, `extra_turns` 0. Before the level ran normally (loading, intro), the counter moved 1-3 per
   second.
 - A turn is therefore 1/12 s. 16 turns (one mana income) is 1.33 s, and 1000 turns is 83 s.
+
+## Order of work inside a turn [exe]
+One main-loop step (`main_loop_outer`) handles the tribe commands, then runs the turn itself (`main_loop_inner`)
+once (or `1 + extra_turns` times, "Turns and timing"). Everything runs in this order:
+```text
+step:
+  1. pop each tribe's queued command into its active slot (the local player's from its ring buffer,
+     a computer tribe's from its scripted record); no turn due -> stop
+  2. run every tribe's active command (process_tribes_cmd, all game modes)
+  3. stage the local player's newest UI command and push it onto the ring buffer, clear the staging
+     -> a click made now is run at step 2 of a later step, never in the turn it was made
+  4. repeat 1 + extra_turns times:
+       computer tribes' native AI (one tick each, skipped under a level flag)
+       a small global countdown (unidentified)
+       the turn below
+
+turn:
+  0. paused: nothing at all, the turn counter does not move
+  1. turn += 1; per-tribe byte countdown; per-turn statistics reset; "a fight involving you" alert re-armed
+  2. tribe elimination check; every 16 turns (after turn 16) the level header's conditional grants
+  3. command groups whose target unit is gone are marked lost
+  4. wood-search pacing (tree re-scans)                     5. a small countdown list (unidentified)
+  6. formations (each formation controller holds its members at their slots)
+  7. pre-fights (challenges), each one's turn
+  8. fights (melee rings), each one's turn, then the battle-loop sound level
+  9. THE UNIT PASS: every unit whose state is not 0, in list order, newest first:
+       class_counter += 1, then its class handler - person, building, creature, vehicle, scenery,
+       general, effect, shot, shape, controller, spell; kinds are interleaved, not grouped;
+       a unit created during the pass first runs next turn
+ 10. the guard list (buildings, some effects and shots, guard controllers): a second, class-specific turn
+ 11. melee-ring command groups re-linked to their controller
+ 12. per tribe with a shaman: her escort group (command-group kind 30) upkeep
+ 13. local-only units (cursor markers, sparkles made by the HUD/renderer): class_counter += 1, handler
+ 14. tribe recount (every per-tribe list and headcount rebuilt) and mana INCOME (every 16 turns)
+ 15. sun-angle tick (off in normal play)
+ 16. deferred deletion: a deleted unit waits its own countdown, then goes back to the free pool
+ 17. an unidentified list upkeep                           18. tower coverage map, only when flagged
+ 19. triggers forget their dead things; a trigger with none left is deleted
+ 20. the tracked person is forgotten once dead
+ 21. per flagged tribe, every 16 turns: scripted orders re-issued
+ 22. TERRAIN: every cell queued by this turn's height changes recomputed (blend, downhill, sea/shore shape,
+     light, "Sea, shore and land")
+ 23. autosave every 64 turns (option)                     24. combat alerts expire
+ 25. failed-route cache countdown                         26. scorch marks fade (every 16 turns)
+ 27. MANA DISTRIBUTION per tribe: reservoir, training buildings, spell charging, the rest banked ("Mana rules")
+ 28. reincarnation-site intro poll
+ 29. person activity tag for ONE tribe per turn (turn mod number of tribes)
+```
+- Everything a person, building, effect or shot does (walking, fighting blows, healing, stranding, breeding,
+  training, foundation checks, spell effects, terrain edits) happens inside step 9, in the order the units were
+  created (a new unit is put at the head of the list). Nothing orders "people before effects" or the reverse.
+- Income (14) and spell charging (27) both come after every unit has run; income first, as "Mana rules" says.
+- Terrain edits made in step 9 change heights at once, but blend, shore shape and light are only rebuilt at
+  step 22: a unit later in the same pass reads the new heights with the old shore shape.
+- Periodic work keys on the global turn (`turn & 15` and so on), except per-unit rhythms, which key on the
+  unit's own `class_counter` (incremented just before its handler, so phases differ between units).
+- Paused means no turn at all, not a turn with nothing in it: the counter stops.
 
 ## Mana rules [exe]
 A tribe holds:
@@ -242,8 +327,17 @@ Example: 20 busy braves, 4 idle warriors and the shaman make 300 + 16 + 30 = 346
 16 turns (1.33 s), about 324 mana per second.
 
 ### Reservoir
-- `give_mana_delayed(tribe, amount)`: `reservoir += amount`, `delay = 1000` turns, 83 s (50 turns, 4 s, with a
-  global flag set).
+- `give_mana_delayed(tribe, amount)`: `reservoir += amount`, `delay = 1000` turns, 83 s (50 turns, 4 s, in a
+  multiplayer game).
+- The flag is `game_flags_1` (0x89C661) bit 0x8, the **multiplayer game** flag [exe]. Its one setter is the
+  network lobby's loop (0x40F16D), when the lobby state (0x894CF9) is 5, "start the game": the host sets it once
+  every player is ready (0x40F81F), a client on the host's start message (0x413CB0). It is cleared when a game is
+  left (`clear_tribe_session`, 0x445430). Campaign games never set it: 1000 turns there.
+- Earlier notes read this bit as the BYRNE cheat switch. The cheat keys (Tab+F2 mana, and the rest of that
+  cluster) run only when it is **clear**: it switches the cheats off in multiplayer, it does not turn them on.
+- Only two things give mana through the reservoir: the shaman killer's share ("Shaman death") and a mana
+  discovery (kind 6, its amount, when its 82-turn countdown ends, "The reward icon over a vault"). Every other
+  gift (scripts, refunds, cheats) goes straight to `incoming` (`add_mana`, 0x41A4F0); no totem path reaches it.
 - While `delay` counts down, nothing is released. Then `reservoir` flows into `incoming` at `rate` per turn.
 - `rate` is set when the release starts, from the amount left:
 
@@ -368,6 +462,19 @@ every call:   if not within 0x70 world units of the tree on both axes: walk to i
 A tree regains `TREE<N>_WOOD_GROW` every 16 turns, up to `TREE<N>_WOOD_VALUE`. `TREE<N>_DORMANT_TIME` is read
 next to them; what it does is open.
 
+### Tree size on screen [exe]
+A tree (scenery 1-6) is drawn at a per-instance scale that follows its wood, recomputed on every wood change
+(0x4A79F0, the same call that adds or removes the wood), and used instead of the model's own scale
+("Model size: the per-object scale"):
+```text
+scale = s / 6 + (s - s / 6) * wood / TREE<N>_WOOD_VALUE      # s = the model's scale, 160 for every bank-2 tree
+```
+- Below 100 wood the tree is removed (replaced first by a dormant tree, scenery 0x11, when its type has one), so
+  the visible range is 100 to `TREE<N>_WOOD_VALUE`. With the file's 400: 37.5 % at 100 wood, 58 % at 200, 79 % at
+  300, full at 400. It is continuous: a burning tree (-4 wood a turn) shrinks every turn.
+- A placed tree starts full: creation adds `TREE<N>_WOOD_VALUE` to its empty stock. The level record has no size.
+- Plants (7, 8) get a wood stock of 100 the same way, but they are sprites (below), drawn at the sprite's size.
+
 ### Values
 
 | Value | Exe | File |
@@ -451,6 +558,107 @@ deliveries), not further static search - every call site of the two obvious cand
 been checked statically. So the moment-to-moment "brave doing construction work" duration (what would replace
 `JUMP_TICKS` 800 ms / `BUILD_TICKS` 5 s) is still not pinned to a confirmed exe number - only the wood-fetch
 concurrency throttle and the stage formula are.
+
+### The hammering pose [exe]
+A brave building a structure is in work sub-state 2 (0x4958F0) of the generic work order (order kind 6; the
+plan buckets its workers by this sub-state, 2 being "working"). Its hammer step:
+```text
+every cycle (sub-step 4), if the plan has its building:
+    face the plan's work point (0x4BA130), stop
+    play action 6 of the animation table (0x4D50D0) = object 27-31 = VSTART 11, the axe swing
+    sound 0x14 (build1-5, synced to frame 1)
+    wait 16 + (rand & 15) turns (1.3-2.6 s), then the next cycle
+else (no building yet):
+    stand idle (action 0, or 4 holding wood), wait 8 + (rand & 7) turns
+```
+- So the original has no separate hammer animation: the hammering IS anim 11, the same axe swing as chopping
+  (no other unused brave-body animation exists: the 168-entry object table maps every follower animation, and
+  VSTART 26-36, 41-46 are the old shaman body, 47 the wildman's).
+- Levelling a building's site (work sub-state 8, 0x497030) is the flattening jump, action 7 = anim 12, or action 4
+  (anim 10, standing holding wood) while carrying; each jump pulls the footprint ground (0x44FDE0), sound 0x02.
+- The same order's sub-state 7 (0x496750) hands the carried wood to the plan through `transfer_wood`, which for a
+  class-9 receiver adds it to the stock and the stage ("Building construction and wear", 0x4BA2C0) - a lead on
+  the "dropped pile" question above (static, not checked live).
+
+### Drawing a building by stage: per-face stage flags [exe, measured]
+There is no separate scaffold model and no height cut. Every building mesh carries its own construction look: each
+face says in which stages it is drawn, and in which of those it is drawn as plain dark wood instead of its own
+texture. Measured live on level 1 by forcing two built huts through stages 0-3 (`pop3-rev` `docs/cheat.md`).
+
+```text
+building state 1 (under construction, also after damage): draw class 0xA -> renderer 0x471C40
+building state 2 (built):                                draw class 5   -> renderer 0x4708D0 (every face)
+mesh = the building's +0x63 for both (the same object; huts: a random style x tribe, 0x40B170)
+
+construction renderer, per face, with s = stage (+0x78, 0..3; formula above) and b = face byte 59 (+0x3B):
+    if b & (1 << s) == 0: the face is not drawn
+    elif b & (0x10 << s): drawn with atlas tile 250 (plain dark brown wood, a fixed UV set) instead of its own
+    else: drawn with its own tile and UVs (tribe-coloured where the tile is)
+```
+- Byte 59 is two 4-bit masks, one bit per stage 0-3: the low nibble "shown", the high nibble "shown as wood". A
+  face with 0 in the low nibble only appears once built (the thatch, the roof tiles); one with both bits set for
+  a stage is a beam of the wooden frame at that stage, and becomes its real texture in a later stage where the high
+  bit is clear (e.g. 0x3F: shown in all four stages, wood in 0-1, finished in 2-3; 0x88: only in stage 3, as
+  wood; 0x0E: stages 1-3, finished).
+- What it looks like (small hut, live): stage 0 a bare wooden frame of posts and beams; stage 1 the frame with the
+  roof ribs; stage 2 walls and the door start to show; stage 3 the walls whole, the roof still open ribs; built:
+  the thatched roof.
+- Faces drawn per stage, of which wood (bank 2 object, the game's bank):
+
+| Object | Faces | Stage 0 | Stage 1 | Stage 2 | Stage 3 | Only once built |
+|---|---|---|---|---|---|---|
+| 107 small hut (style 1, blue) | 75 | 17 (17) | 39 (29) | 49 (25) | 62 (30) | 13 |
+| 119 small hut style 2 | 49 | 13 (13) | 20 (12) | 32 (13) | 46 (15) | 3 |
+| 131 small hut style 3 | 55 | 18 (18) | 35 (35) | 54 (54) | 54 (36) | 1 |
+| 108 medium hut | 92 | 58 (4) | 62 (6) | 64 (6) | 73 (13) | 19 |
+| 109 large hut | 110 | 71 (4) | 79 (12) | 84 (12) | 91 (13) | 19 |
+| 79 drum tower | 76 | 12 (12) | 19 (8) | 31 (15) | 49 (21) | 27 |
+| 95 temple | 147 | 14 (14) | 29 (23) | 46 (25) | 89 (54) | 58 |
+| 91 spy hut | 77 | 8 (8) | 17 (9) | 35 (17) | 52 (18) | 25 |
+| 103 warrior hut | 107 | 15 (15) | 35 (22) | 53 (18) | 68 (17) | 39 |
+| 99 firewarrior hut | 144 | 26 (26) | 57 (34) | 77 (31) | 102 (37) | 42 |
+| 83 boat hut | 133 | 14 (14) | 29 (16) | 43 (17) | 71 (36) | 62 |
+| 87 airship hut | 117 | 16 (16) | 48 (32) | 80 (46) | 97 (27) | 20 |
+| 152 vault, 7 guard post | 107, 20 | 0 | 0 | 0 | 0 | all |
+
+- Medium and large huts show most of their faces from stage 0 with little wood: they are reached by growing a
+  smaller hut, not built from nothing (why their flags differ is not traced). A few faces have a high bit
+  without the low one (never drawn at that stage, so the high bit does nothing).
+- Which stage a site is at: the formula above. Hut (cost 300): 100 wood -> stage 1, 200 -> stage 2, 300 -> built,
+  so a hut never shows stage 3 while building up; a drum tower (900) goes 0, 0, 1, 1, 2, 2, 3, 3, built.
+- **Damage uses the same drawing.** A built building has no wood-stock companion. The first damage (a burn's hit,
+  an attack's wear, whirlwind or earthquake, some effects; all through 0x498140) gives it one holding the full
+  cost and puts the building back in state 1, then takes the wood off: a hut hit once (200 of 300) is drawn at
+  stage 2 (walls in part, roof as a frame). It is drawn whole again only when repaired to full (stage 4 ->
+  state 2). Faces flying off in a partial explosion are separate effect units ("Attacking a building").
+- The stage masks are built from `+0x78`, which on a building is the stage; the companion (class 9 type 1, mesh
+  51) mirrors it.
+
+#### Flying faces (the partial explosion) [exe]
+When a building (or vehicle) breaks, 0x407860 spawns one debris piece (class 10 type 7) per selected face of its
+mesh, and 0x502660 (class-10 state 7) flies it:
+```text
+piece = a copy of that one face (3 or 4 corners), placed at the face's centre, pulled half way towards the
+        building's centre; never per triangle or per vertex
+which faces: depends on the caller - everything (topple on uneven ground, vehicles), a staged set keyed by face
+        byte 59 (wear to destruction), or a few per turn (a building crumbling over several turns, with a dust puff
+        per piece); faces of stages the building has not reached are left out
+with random physics (wear to destruction, some vehicles): upward speed 64-95 and three constant spin speeds
+        (masks 0x15 / 0xA9 / 0x15 of a random number, per turn on 2048 a turn); without: no spin, it just falls
+every turn: spin; tethered to a whirlwind -> no gravity while the whirlwind lives; else the shared
+        flying-object step (0x4E7A80, gravity not traced)
+on touching the ground:
+    water -> deleted, a splash (7/0x41) in its place
+    land  -> a dust puff (7/3) and sound 0x13, then deleted (a 50 % roll, and the other half too, since its
+             settle counter starts at 24 or 0, under 32)
+```
+- So every piece disappears the moment it lands, with one puff; none lies on the ground. (A branch that would
+  halve the counter and let a piece bounce is unreachable with the values any caller uses.)
+- No gameplay effect: a piece's turn only spins, moves, and on landing makes a puff or splash and a sound; no
+  damage, no collision, no wood or terrain change (the shared flying step 0x4E7A80 is not fully read, but nothing
+  of it is used here except "landed"). In the original the pieces still draw from the game's random generator
+  and take object slots; neither matters for us, so they can live in the client, driven by the simulation's
+  "this building broke, for this cause, at this stage" (the cause and stage pick the faces).
 
 ## Huts: breeding and growth [exe]
 A hut (building types 1-3, small, medium, large) has two counters, updated by the building handler on its own
@@ -693,7 +901,7 @@ level-format.md "General (6), model 6, trigger"). The trigger handler (`FUN_004f
 
 | `TriggerType` | Path |
 |---|---|
-| 0 proximity, 3 shaman proximity, 5 shaman + angel of death | prayer gauge, below (3 and 5 count only shamans) |
+| 0 proximity, 3 shaman proximity, 5 shaman only, firing brings an Angel of Death | prayer gauge, below (3 and 5 count only shamans) |
 | 1 timed | a counter +1 per call, fires at `TriggerCount` |
 | 2 player death | its own check (0x419480 with `TriggerCount`) |
 | 4 library (vaults) | its own branch (0x4FB813), not traced |
@@ -815,8 +1023,11 @@ here (it only follows a parent linked at +0xA4, which is 0).
   turn) and wraps at 4 × 14, so it loops with the frame rate; which of the 16 sprites it shows per clock value is
   not traced. Seen in the game from far away: a yellow blob high over the vault.
 - Measured (level 1, live): vault at ground 75; its dormant discovery at 875 (ground + 800); the marker at 1147,
-  so the slot-1 offset of a vault is 1072 (2.1 cells above the ground); the glow at 1067; the marker 14 units
+  so the slot-1 offset of a vault is 1072; the glow at 1067; the marker 14 units
   from the vault's own position (the apex). Level 1's vault teaches building 7 and the marker had sprite 1077.
+- 1072 is the slot height byte of the vault's shape × 16, not read from the pyramid model. Heights are terrain
+  units (256 a cell), so it is 4.19 cells, not 2.1. The pyramid is drawn 1023 high (see "Model size"), so the icon
+  sits 49 units (0.19 cell) over its apex and the glow 31 under the icon, 18 over the apex.
 
 When the vault is used (trigger fire, 0x4FBA90; static, not seen live):
 ```text
@@ -836,6 +1047,83 @@ clone, after 82 turns (6.8 s): the reward is granted, then the clone is deleted 
 - A discovery can also be picked up on its own (state 4, every 4 turns): a person of a tribe on its cell whose
   current order is kind 29 (0x4F62C0) takes it, with the same sound 0x70, a 1-turn hide delay and the 82-turn
   countdown. A dormant vault discovery never runs this.
+
+### Discovery cinematic: the reward flies to the panel [exe]
+When the player's tribe gets a discovery (6 turns after the vault fires, "The reward icon over a vault"), the game
+plays a screen-space cinematic: a building's model breaks into its faces and rebuilds itself in front of the
+camera; a spell's glyph flies to the screen centre and on to its panel button. Traced statically, not checked
+live; addresses in "Reference".
+- **Timing is per drawn frame**, not per game turn: every stage length, speed, spin and fade below advances once
+  per frame (the driver runs from the draw loop), so the cinematic is faster on a faster machine. While paused it
+  stops moving but is still drawn. Frame counts are given as such; seconds depend on the frame rate.
+- Kind of reward: building (2) -> the building cinematic, plus the sparkle burst; spell (11) -> the spell
+  cinematic, plus the sparkle burst; anything else (mana) -> a swirl of sparkles only (0x4815A0, not traced here).
+- **Start point**: the discovery's screen position (the icon over the vault) if it is drawn inside the 3D view;
+  otherwise the centre of a panel widget rectangle (which one is not traced).
+- **Target**: the centre of the reward's panel button, from the panel layout (fractions of the screen size): a
+  building's slot is building table `+0xE` (huts 2, drum tower 3, temple 4, spy 5, warrior 6, firewarrior 7, boat
+  hut 8, airship hut 9, guard post 10); a spell's is the panel slot holding that spell. The game switches the side
+  panel to that page first (building page, spell page) so the button is on screen.
+- **When the flight reaches the button** (stage 4 of either cinematic), the discovery's 82-turn countdown is cut
+  to 1: the reward lands the turn after the animation arrives, not 6.8 s after the vault fired. At the end the
+  panel stays forced open 4 more turns.
+
+Building (0x4819C0 init, 0x4839F0 per frame):
+```text
+mesh = building table +0x0 (objs0 index): huts 107/108/109, drum tower 79, temple 95, spy 91, warrior 103,
+       firewarrior 99, boat hut 83, airship hut 87, guard post 7
+one piece per face of the mesh; each piece: tumble angles a, b, c = random 0..2047, yaw 0, yaw rate random 0..33
+view: orthographic, screen = centre + model × scale / 256; model spun about its vertical axis by `spin`, tilted
+       by `tilt`; faces textured (tinted with the player's colour where the texture is), two-sided
+start: scale 8, tilt 0x600, spin 0, centre = start point; sounds 0xCC and 0xCB (circling the listener)
+
+stage 1, 19 frames (fly out):  sound 0xCE on the first frame; spin speed 0x38 (56/2048 a frame)
+    each frame, eased linearly over the frames left (x += (target − x) / frames_left):
+        spread radius 0 -> 700 model units, scale 8 -> 40, centre -> screen centre, tilt 0x600 -> 0x7A4
+    every piece sits `radius` out from the model centre (horizontally, in the direction of its first vertex,
+    turned by its yaw) and tumbles about its own centre: a += 2·(i mod 16) + 2, c += ((i+5) mod 16) + 1,
+    b += 2·((i−7) mod 16) + 2, yaw += its rate (all mod 2048)
+stage 2, 23 frames (assemble): each piece's radius and yaw ease to 0 and its tumble angles to 2048 (a whole turn):
+    the faces fly back into place and the building is whole at the end
+stage 3, 31 frames (show): the whole mesh; spin speed starts at 0xB6 (182) and drops by 8 a frame (to −66):
+    it turns fast, slows down and starts to turn back
+stage 4, up to 101 frames (to the panel): sound 0xCD; side panel to the building page; spin speed −6 a frame
+    down to −273
+    frames 0-11: the whole mesh
+    from frame 12: the faces peel off one by one as they pass the depth peak of the turn (at most 4 a frame);
+        a released face keeps its orientation, tumbles faster, shrinks to nothing and travels in a straight
+        line onto the button in 10 frames
+    frame 16: a 6-frame sparkle animation (hfx 1288-1293) starts on the button, 100 frames long
+    frame 24: sound 0xCE stops
+    every 20 frames from frame 22: a ring burst at the button (0x4811A0; draws nothing in this build)
+    once every face is flying, the stage ends about 10 frames later
+    end: the sparkle on the button replays for 4 frames
+```
+
+Spell (0x4841B0 init, 0x484320 per frame):
+```text
+sprite = the spell's panel glyph (spell table +0xE, hfx 1057-1074), drawn as one rotated, scaled quad
+start: sound 0x71 (circling the listener); position = start point, scale 52/32 (1.6×), rotation 0
+stage 1, 1 frame: aim at the screen centre
+stage 2, 13 frames (to the centre): speed = distance × 36/256 a frame for frames 0-4, then × (11 − t)/7
+    (at least 2): about 1.1 × the distance in all, a slight overshoot; scale grows to 256/32 (8×) by frame 4;
+    rotation eases to 1934 by frame 8, then the spin drops by 51 a frame
+stage 3, 4 frames: speed 2; spin −45 a frame
+stage 4, up to 160 frames (to the panel): aim at the button; spin −28 once, then −34 a frame (halved at frame 6,
+    then −22 a frame); scale −20 a frame down to 52/32; speed × 1.5 a frame up to 80 pixels a frame
+    frame 4: the 6-frame sparkle (hfx 1288-1293) starts on the button, 100 frames
+    when 3 × speed ≥ the distance left: side panel to the spell page, the ring burst, the discovery's countdown
+    cut to 1
+    when speed > the distance left: snaps onto the button, the stage ends; the sparkle replays 4 frames
+```
+- The spell path's only sound is 0x71. It never plays 0x72 ('discoend'), which belongs to the other swirl
+  stages (mana and the shaman-death soul swirl).
+
+Sparkle burst, with both (0x481490, run by 0x482290): 200 particles in one frame at the start point, each at
+14-43 pixels a frame in a direction within ±45° of a common heading (the heading's screen direction is not
+settled: its aim point is still 0 when they spawn), sprite hfx 1294-1299 (one in 16: 1288-1293) on a random frame
+of 6, each in a random tribe's colour; 10 are removed per frame, so all are gone after 20 frames. Each leaves 3
+fading trail copies (sprites 318-321, bank not identified) moving at 6/16 of its speed.
 
 ## Reincarnation sites [exe, measured]
 No level file has pillars (scenery 12): the game creates them when the level loads, for each tribe that has a
@@ -1303,7 +1591,7 @@ questions" ("Blast") for what a corrected trial needs to catch instead.
 | 12 | Land bridge (70 000, 5120, 4) | From the caster to the target, 4 cells wide (−1, 0, +1, +2 across the line), heights on a straight slope between both ends (at least 90): each turn `h += clamp(T − h, ±LAND_BRIDGE_MAX_CHANGE) / (64 − turn)` (`LAND_BRIDGE_MAX_CHANGE` 256, 64 being `LAND_BRIDGE_DURATION`), so every cell reaches its height after 62 turns (5.2 s) when the gap is small: the cap makes large gaps fall short (gap 256: 251 reached, 500: 488, 800: 759, 1000: 900); sea cells raised too; a smoke puff on every bridge cell every turn. Buildings left on ground uneven by more than 200 collapse ("Terrain changes: what reacts"). |
 | 13 | Angel of death (510 000, 3072, 1) | A falling meteor, then an angel (person type 8, `LIFE_AOD` 10 000, confirmed in the exe's own per-type table) appears already flying and hunts the nearest enemy on the whole map, shamans included; grabs one victim at a time, carries it a fixed 28 turns (2.3 s), then releases it to die through the ordinary death pipeline - the angel has no dedicated kill move of its own. Two angels fight each other by health instead of grabbing. Never lands (code-level: altitude is clamped above terrain every tick), is immune to a firewarrior's bolt beyond ~10% damage and to Whirlwind's lift (both re-confirmed in code); `AOD_KILL_COUNT`/`AOD_DURATION` are documented constants but their enforcement was not located in the angel's own hunting AI this session. Fully traced this session (spawn sequence, grab/carry/release, area panic, vs-angel combat, flight physics) beyond a prior session's opening-scan-only pass - see "Angel of Death mechanics" below for the complete breakdown, including what is still open (building-type exclusions, vehicle-passenger grabbing, the literal kill-count/duration check, and several outer sub-states of its hunting AI). |
 | 14 | Earthquake (175 000, 4096, 2) | 120 turns (10 s) of shake. At turns 24, 56 and 88 each building in 16 × 16 cells has a 20/128 chance to be shaken (occupants out, partial explosion). At turn 60, a half-disc of radius 8 cells sinks by up to 600 (`600 × (4096 − d) / 4096`), with a lava fissure of short-lived lava squares and possibly two lava flows. |
-| 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point. |
+| 15 | Flatten (125 000, 4096, 3) | 15 turns (1.25 s): a 45-cell disc (about 3.5 cells radius) converges to the ground height of the target point, `h += (T − h) / turns_left`, levelling from the middle outwards; see "Flatten (effect state 31)". |
 | 16 | Volcano (800 000, 3072, 1) | 160 turns (13.3 s): 80 turns of rumbling, then a cone rises over 59 turns (rim 1024 at 2.5 cells, slopes to 5 cells, a plug in the crater). At turn 110 every building in 6 × 6 cells is destroyed and every person there (but the caster's shaman) set on fire; lava flow, 16 s growth + 1.3 s fade ("Volcano lava flow"); a random number of fireballs (about 31 small and 9 big on average) thrown ballistically 3-10 cells out, landing in simple blasts ("Volcano fireballs") and 26 decorative rocks ("Volcano rocks"). |
 | 17 | Convert wild (10 000, 8192, 4) | Every 8 turns the nearest wildman on an all-land cell in the 5 × 5 cells around the cast cell (7 × 7 for a computer caster) becomes a brave of the caster (if the tribe is under 200); wildmen on coast cells there step inland instead. Life 18 turns (22 computer), reset to 18 by each conversion. A scatter of gold sparkles on a 2.5-cell-radius circle, 4 a turn, 4-7 turns each. See "Convert wild". |
 | 18 | Armageddon (hidden) | Clears the map, turns every building into one person, gathers every tribe on an arena around the target and makes them fight; the weakest shaman is struck by blast or lightning at intervals; anyone more than 9 cells away dies. |
@@ -2192,6 +2480,35 @@ drawn by 0x516430), otherwise drawn 1:1 (0x5162E0).
 - The hypnotised halo lasts as long as the flag: 0x4D92B0 counts the timer +0xAC down every 8 turns, then
   recreates the person in its original tribe +0xAD; the flag is cleared at once if that tribe is gone.
 
+### Flatten (effect state 31) [exe]
+The spell's shot spawns one effect at its arrival point `P` (exact world position). Its whole life:
+```text
+create:   T = ground height interpolated at P (the same bilinear surface units stand on)
+          turns_left = 15, spread = 5120, sound 0xAE once
+1st turn: r = 380; 32 sparkles (7/0x3C) on a ring around P, linked to the effect
+each turn, turns_left = 15, 14, ..., 1:
+    for each of the 45 height points around P's cell corner (offsets dx, dz in cells with dx² + dz² < 16,
+            i.e. up to (3, 2); the corner is P rounded DOWN to its cell, not the nearest corner):
+        if distance²(P, point) <= r²:              # P exact, the point at its cell corner
+            h += trunc((T - h) / turns_left)       # integer division towards zero
+            h = clamp(h, 0, 1024)
+    "ground moved" around P's cell (terrain recompute, people and buildings told, radius 6)
+    each sparkle drops a small sparkle (7/0x3D, 48 turns) and moves on round its ring
+    step = spread / turns_left; r += step; sparkle ring radius += step; spread -= step
+    turns_left -= 1; at 0 the sparkles and the effect are deleted
+```
+- The curve is linear in time: the gap divided by the turns left gives equal steps (truncation aside), and the
+  last turn (`turns_left` 1) closes whatever is left, so every point the radius has reached is exactly at `T`
+  after 15 turns (1.25 s). That is our formula.
+- The radius grows 380, 721, 1062, 1403, 1744, 2085, 2426, 2767... units from `P` (5120 spread over the 15
+  turns). The points next to `P` move from the first turn; the disc's outer points join on turns 3 to 7 depending
+  on where `P` lies in its cell, then make bigger steps (their gap over fewer turns). The ground visibly levels
+  from the middle outwards; the sparkle ring grows with it, 380 units inside the levelling edge.
+- Centring: the 45 candidate points are fixed by `P`'s cell (floor), the radius test and the target height by
+  `P` itself. For a point near a cell's far corner the disc is lopsided by up to a cell.
+- Land bridge is separate code (effect state 25, "Per spell" 12): a step clamped to ±256 then divided by
+  `64 - turn`, so large gaps fall short; flatten has no clamp.
+
 ### Terrain changes: what reacts
 Every terrain-changing effect (land bridge, flatten, erosion, earthquake, volcano...) ends each cell change with the
 same two calls:
@@ -2208,7 +2525,7 @@ calls. Two sounds (0xAB, 0x29) when it starts.
 | Person | Nothing beyond clearing the flag at the end of its turn (0x4D3CEA): the person physics follows the ground every turn, lifting people when it rises and letting them fall when it drops ("Person physics"). No push, no damage. |
 | Building (0x408080) | Runs this check every 4 turns, or every turn for a "water-sited" type (boat huts 13/14 and any other type sharing the flag). The base becomes the average height of its footprint's fine-grid cells, except a water-sited type, which instead just keeps its base clamped to a minimum of 1 (never recomputes an average). **This is the slow "building flattens the floor back" case**: every footprint cell within 200 of the base (building record +0x46, every type) is pulled back towards it, 2 units/turn (0x44FDE0, rate +0x44), each pull re-notifying "ground moved" for that one cell; no damage, no destruction - a water-sited type's own water footprint cells are pulled towards sea level (0) instead of the base. Separately, **two destroy reasons** (checked before/instead of the pull-back, never together with it for the same cell): **(1) uneven ground, sub-state 1** - the first footprint cell found MORE than 200 away from its target (i.e. outside the range the pull-back above would have handled) destroys the building on the spot instead of being pulled back, and stops the rest of that call's cell checks/pulls - "too steep/uneven", never checked for a water-sited type (no single target height to diverge from). **(2) flooding, sub-state 2**, ordinary (non-water-sited) types only - before the per-cell pass even starts, if more than 5/8 (62.5%) of the footprint's fine-cells are at or below sea level (height <= 0), the building is destroyed right away; this is the "second destroy reason" the TODO previously listed as untraced/guessed-flooding - now confirmed flooding, not steepness, and confirmed exclusive to ordinary buildings (a water-sited type instead keeps sitting there, base clamped to a minimum of 1, immune to this check). The two reasons are also visibly different: sub-state 1 shatters the building's own mesh into flying debris then triggers a "simple blast" explosion on it (0x406F40, Ghidra's own name for it is `alloc_spell_blast_or_sinking`); sub-state 2 instead hands it to the same pending-object slot person-death's spirit controller uses, spawning a dedicated "building sinks and rocks" animation ("Building sinking (flooded destruction)" below). Either reason sets state 3 and fires the destroy/explosion pair (0x4ED6F0/0x4ED640) unless already suppressed (+0xe bit 0x10); no ashes are made by this path either way (0x40B230 is attack/fire-destruction only). |
 | Boat (vehicle types 1, 2) | One forced movement pass (0x4E7FB0); no damage or destroy call in it. A boat whose cell becomes all land is stranded at the next 16-turn check (state 8): passengers put off, it keels over, explodes 160-287 turns later ("Vehicles"). |
-| Balloon (vehicle types 3, 4) | Never explodes from it. Each turn (0x4E8F00) it samples the ground ahead, takes the highest point plus a hover height of its type (another one over buildings: vehicle table 0x5A7938, stride 0x17, +0xD / +0xF) and climbs or sinks towards it at its profile's vertical rate: a bridge under it lifts it. |
+| Balloon (vehicle types 3, 4) | Never explodes from it. Each turn (0x4E8F00) it samples the ground ahead, takes the highest point plus a hover height of its type (560 over a building or tall scenery, else 200: vehicle table 0x5A7938, stride 0x17, +0xD / +0xF) and climbs or sinks towards it at its profile's vertical rate (22 up, 16 down a turn): a bridge under it lifts it. Details: "Balloon height, look-ahead and bobbing". |
 
 ### Building sinking (flooded destruction) [exe]
 What the flooding destroy reason above (sub-state 2) actually spawns: a class-10, type-0x13 stand-in object (`alloc_spell_blast_or_sinking`'s own sink branch, 0x406F40 -> creation handler 0x500D1B -> per-turn animation 0x503550), copying the dying building's position, facing and a large block of its own instance fields so the stand-in keeps looking and sitting exactly like it did. It lives for a fixed 80 turns (6.7 s) and runs two things at once over most of that time, before a short final flourish:
@@ -2219,8 +2536,20 @@ What the flooding destroy reason above (sub-state 2) actually spawns: a class-10
 Not traced further this session: the exact oscillator math (a handful of small trig/angle helpers, 0x586074/0x4E9BA0/0x4E9B70/0x4E6C80 - their role is clear enough from how the result is used above, just not their internal formulas) and the object spawned during the final spiral (0x4EE580, plausibly a splash/bubble particle).
 
 ### Ghost Army mechanics [exe]
-Cast: no dedicated cast dispatch - the generic per-spell effect table spawns the spell's sole component directly,
-a class-7 type `0xc` ("ghost army") controller (effect state 13, `process_ghost_army`). The controller runs for
+Cast: no dedicated cast dispatch - spell type 9 goes through exactly the generic pipeline of "From cast to
+effect", now confirmed for this type (the spell unit's per-turn dispatch sends types 1-21 to one shared handler
+with no per-type branch, and the shared init puts it into the 6-turn wait whenever the tribe has a shaman):
+
+```text
+cast + 6 turns:  a standard shot (8/1, row byte +0x27 = 1, 1400 units/turn) flies from the shaman to the target
+                 row +0x1B bit 0x40 set: it follows a targeted unit; row +0x2F = 0: never shield-deflected
+shot gone:       next spell-unit turn, the row's only effect byte (0x0C) spawns the controller at the target
+controller + 5:  the ghosts appear (tick 5 below)
+total:           6 + ceil(distance / 1400) + 5 turns, e.g. 4096 away: 6 + 3 + 5 = 14 turns (1.2 s); the ±1 turn
+                 from the order the shot and the spell unit are processed in is unverified
+```
+
+Its sole component is a class-7 type `0xc` ("ghost army") controller (effect state 13, `process_ghost_army`). The controller runs for
 exactly 5 ticks (0.4 s) then unconditionally self-deletes - it is never an ongoing presence. Tick 1 scatters 81
 cosmetic smoke puffs around the cast point (a materialising-mist burst, unrelated to the actual spawn). Ticks 2-4
 are no-ops. Tick 5 does the real work:
@@ -2267,9 +2596,15 @@ side):**
 - **A ghost shaman almost certainly contributes no mana income**: not independently confirmed at the income
   computation itself, but strongly implied - the per-type/headcount counters a ghost is excluded from (above) are
   the same population tallies the mana-income mechanic is built on.
-- Still open, not traced this session: the exact `CAST_RELEASE` (cast-to-effect delay) for this spell specifically,
-  and whether anything scores/prioritises ghosts specially as an auto-attack *target* (distinct from what a ghost
-  itself may attack, already documented) - queued in `pop3-rev`'s own `docs/trace-backlog.md`.
+- **As an auto-attack target, a ghost is exactly an ordinary person of its type** [exe]: every read of the ghost
+  status bit in the exe (48) was enumerated, and none sits on the candidate side of a target scan or attack check
+  (the generic melee, preacher and firewarrior auto-scans, the shared square-area candidate scan, the per-attacker
+  eligibility dispatcher and its three branches). An enemy's looker finds, accepts and ranks a ghost like a live
+  unit; the only difference is what happens on a hit (a ghost is destroyed outright, above). The combat-side reads
+  all concern the ghost as the ACTOR: its own restricted scan (only enemy ghosts and shamans), the hand-off of its
+  attack to a ghost double on its cell, its preacher strike bailing out, and - new - **a ghost attacking a building
+  never damages it**: the attack-order handler skips the building's per-hit damage (and a later follow-up step) for
+  a ghost attacker, while the building-alarm calls just before it still run.
 
 ### Angel of Death mechanics [exe]
 Cast: no AoD-specific cast dispatch - it follows the generic cast-to-effect pipeline (shot, then the spell's own
@@ -2410,11 +2745,34 @@ mechanism for the angel eventually dying of its own `LIFE_AOD` hit points instea
 still-unopened outer sub-states remain the leading place either literal cap could be hiding. Also not located: a
 dedicated "pull a person out of a building" call (the tower-housed-target standoff-distance check above never
 actually extracts anyone - the grab mechanic is identical whether the locked target is in the open or in a
-tower), an "evict a vehicle's passengers" call, or any building-type exclusion (prison/pyramid/totem are
+tower), any building-type exclusion (prison/pyramid/totem are
 user-reported as immune to attack, but no building-attack path or exclusion table was found inside state 28 at
 all - most likely it lives in the still-unopened per-tribe fallback scan's own building-candidate path, not
 reached this session). No selection/order-eligibility check for type 8 was located either - "cannot be selected
 or given orders" is the existing lore/user report, not yet re-derived from code.
+
+**Vehicle passengers [exe]** (resolves the "evict a vehicle's passengers" question above; traced 2026-11-27):
+```text
+grabbed (person state 40 ENTER, 0x4E05E0), victim aboard a vehicle (+0x9F):
+  the vehicle gets a 40-unit push along the angel's heading (slope-scaled, the same push applier as
+    Shove/stagger), and its "being pushed" flag (+0x14 bit 0x8, as a simple blast sets)
+  the victim is taken off, forced (0x466C80 with force: disembark at the vehicle's own exit point)
+  then held and carried like any victim
+area panic (0x4DB5E0) on a passenger: no aboard check, so it is put in person state 26 (speed 110, a heading
+    away from the angel ± 455/2048, 64 turns) - but it is NOT taken off:
+  still attached (+0x9F kept), its physics stays off (+0xC bit 0x4000, re-set by the vehicle's seat sync
+    0x465EA0 every turn, which also puts it back in its seat and turns it with the vehicle): its own speed
+    and heading never move it
+  the one side effect: if it is the DRIVER (seat 0, e.g. a lone passenger), its speed 110 reads as "driver
+    moving" ("Driving: the driver is only a moving/stopped switch"): a parked vehicle sets off and a moving one
+    keeps going, at its own speed, towards the driver's last destination (+0x53); a balloon within 1040 of it
+    on both axes takes the arrival branch, which unloads the driver (0x4EB9A0 -> 0x4659D0)
+  after its 64 turns it drops to its type's default state, still aboard (unverified what it then does)
+```
+So in the original a grab does pull a passenger out of its vehicle and jolts the vehicle, while the panic leaves
+passengers seated; only a panicked driver can make a vehicle move, and a balloon that is already near the
+driver's last destination can unload it, which may be the "panic makes people jump off" memory (unverified
+live: whether `+0x53` is still that close after a normal trip).
 
 No AoD-specific intro/appear state was found: the angel is spawned straight into state 28's own dedicated spawn
 sub-state (13, above), not the universal state-1 idle hand-off every other fresh unit goes through - so "faces the
@@ -2665,6 +3023,69 @@ screen = (x', y') · (1 << (S + 16)) / z'             # S = perspective shift, t
 - M decoded in full (column order `M00 M01 M02 / M10 M11 M12 / M20 M21 M22`):
   `M00=cosY, M02=sinY, M10=sinP·sinY, M11=cosP, M12=-sinP·cosY, M20=-cosP·sinY, M21=sinP, M22=cosP·cosY` - so
   `yaw = atan2(M02, M00)` and `pitch = asin(M21/16384)` read straight off the matrix, live, every frame.
+
+### Model size: the per-object scale [exe]
+Every 3D model (buildings, huts, vehicles, the pyramid, trees, scenery) is drawn at its own scale, the u32 at
+offset 12 of its `objs` record (objects.md "Records"):
+```text
+scale = the object's own scale, or the thing's per-instance override when it has one
+v = point * scale / 256                          # all three axes, in render units
+v = rotate(v)                                    # heading, plus pitch/bank for things that have them
+map x, z = thing x, z + 2 * v.x, 2 * v.z         # render units are map units / 2
+height   = ground (or thing height) + v.y        # terrain height units, unscaled
+```
+Render units are 256 a cell on every axis (horizontal = map / 2, vertical = terrain height units), so a model
+point is `scale / 65536` cells, the same on all three axes.
+- Bank-2 scales: 160 for nearly every building, hut, vehicle and the prison; 150 for the pyramid of knowledge and
+  its door models; trees and small scenery have their own (12 to 300).
+- At 160 a model is 1.25 × (point / 512 cells); at 150, 1.17 ×. The file's own bounding box (offset 32) is the
+  points already multiplied by `scale / 128`, the "about 1.25×" objects.md noted.
+- The pyramid of knowledge (points 1746 high, ±536 wide): 1023 high (4.0 cells), 2.45 cells across in x and 2.54 in z.
+- A building on a cell whose flag 0x2 is set takes the ground height under each vertex, otherwise the thing's height.
+
+### Scenery looks: plants and prayer heads [exe]
+A scenery thing takes its look from the scenery table (24 bytes a type): a draw class (word +0) and a model or
+sprite (word +0xA), set at creation (0x4A66C0). Model numbers are bank-2 numbers (objects.md "Banks 2-7 index ->
+bank 0 index"); draw class 0 is a camera-facing `hfx0-0.dat` sprite, 2 a static model, 4 a morphing model.
+
+| Scenery | Class | Look |
+|---|---|---|
+| 1-6 trees | 2 | models 13-18 (the bank's trees), scaled by their wood ("Tree size on screen") |
+| 7 plant 1 | 0 | hfx 2, one 20 x 15 frame: a tuft of dry brown reeds |
+| 8 plant 2 | 0 | hfx 3, one 25 x 22 frame: a clump of reeds with orange flower heads (bulrushes) |
+| 9 "head" (prayer place) | 2 or 4 | chosen by the trigger on its cell, below; model 45 (the stone head) until then |
+| 10 ground fire | 2 | model 5 = bank 0's 12, camp-fire flames ("Ground fire, ignited trees, and a burning building's flame") |
+| 13 rock | 0 | hfx 346-349 ("Volcano rocks") |
+
+Plants are drawn like the volcano rock: one sprite, bottom-centred on the thing, no rotation, opaque, no
+animation and no position variant (scenery flag 0x20 is clear for 7 and 8). Palette: as for every hfx sprite in a
+level, open.
+
+**Prayer heads (scenery 9)**: the level's scenery 9 is not one model. Its look comes from the trigger on its cell
+(0x4FBD20, run once at level load by 0x4851E0 and again whenever the trigger changes state):
+```text
+at load, per trigger: flag 0x20 if one of its targets is a discovery with AvailabilityType 3 (once),
+                      flag 0x10 if one is a discovery with AvailabilityType 1 (permanent)
+TriggerType 3 (shaman only):   model 8 = bank 0's 1, the stone totem, morph 8 (keys 9, 10, 11 = bank 0's 2-4;
+                               24, 24 and 1 steps). Held on frame 1; when the trigger fires it plays to frame 49
+                               and holds there (the rocks turn into line, objects.md "Totem rocks")
+TriggerType 5 (shaman only, fires an AoD): model 157 = bank 0's 19, the winged-death totem, static
+else flag 0x20 (a "once" gift): model 45 = bank 0's 82, the stone head, morph 1 (keys 46, 47 = bank 0's 83, 84,
+                               8 + 8 steps, back and forth: the head tips one way then the other, a nod).
+                               Morphs while the trigger is active, held on frame 1 once inactive; while it
+                               morphs, sound 0xC1 on the key frame of each loop
+else flag 0x10:                model 146 (147 while not prayed at): both empty in bank 2, nothing drawn; no level
+                               uses it
+else (no discovery target):    model 149 = bank 0's 187, a totem pole, morph 7 (keys 150, 151 = bank 0's 188,
+                               189, 8 + 8 steps: one part swings, 12 points move). Morphs only while the trigger is
+                               active and someone prays (trigger flag 0x8, set while the gauge rises), held on
+                               frame 7 while active and idle, frame 1 when inactive
+```
+- Morph speed: one step per drawn frame (draw class 4), so a nod or a pole swing is 16 drawn frames.
+- In the shipped levels (41 `levl` files of this install, all 98 scenery 9 with a prayer trigger on their cell):
+  65 stone heads (32 levels), 21 stone totems (levels 15, 22, 79, 83, 100, 111, 131), 11 totem poles (levels 2,
+  3, 5, 6, 9, 10, 21, 79), 1 winged-death totem (level 5). Pyramids are not among them: they are vaults (building
+  18, 23 in the levels). The stone head scale is 150 (1.17 x), the others 160.
 
 ## Camera flyby state (tribe_struct) [exe, partial]
 Where the matrix actually comes from, and how it behaves during an AI-script flyby (ai-scripts.md "Worked
@@ -3056,8 +3477,9 @@ The row itself is purely height + blend, same inputs as the already-documented c
 ```text
 altitude_index = height(cell)                                 # the SAME cell the corner sits on, no averaging
 altitude_index += 0x4B                                         # +75, unconditional
-if blend != 0: altitude_index += 0x4B                          # +75 again (blend is 0 only on a perfectly flat
-                                                                #   cell with all 8 neighbours equal height)
+if blend != 0: altitude_index += 0x4B                          # +75 again (blend is 0 only on a SEA point: it and
+                                                                #   its 8 neighbours all at height 0, "Sea, shore and
+                                                                #   land"; flat land has blend 1, corrected 2026-11-27)
 altitude_index = clamp(altitude_index, 0, 0x3FE)                # 1022 of bigfade's 1152 rows
 ```
 Each of a quad's 4 corners gets its own `altitude_index` and `light` this way (no cross-cell averaging at this
@@ -3212,6 +3634,37 @@ would show "a fixed wave pattern moving in a fixed direction" (a visible prevail
 scrolling in opposite directions cancels that net directional drift while still producing "lots of local swirls
 and seemingly non-uniform motion" - the sea should read as animated and swirling, never as a frozen static
 surface, but never as a simple flow in one direction either.
+
+## Sea, shore and land [exe]
+There is no height threshold such as "height <= N is sea". One per-vertex bit, recomputed with the terrain
+(step 22 of "Order of work inside a turn"), drives both the drawing and the simulation:
+```text
+per height point p (after any height change around it, and at level load):
+    m = max(0, height of p and of its 8 neighbours)
+    sea(p) = (m == 0)                    # stored as blend 0; otherwise blend = clamp((max - min) / 8, 1, 127)
+per cell (its 4 corner points):
+    shape = table[sea bits of the 4 corners]    # 16 shapes: 0 land, 1 open sea, 2-15 shore
+per height point p at height exactly 0 whose 4 surrounding cells are all shape 0 (land):
+    height(p) = 1                        # a land-locked sea-level point is raised (off under one level flag)
+```
+- A point is sea only if it AND all 8 neighbours are at height 0 (or below). Every point at height 1 or more is
+  land, and so is every height-0 point next to one: the coastline sits one point further out to sea than a plain
+  `height == 0` test puts it. A flat land point gets blend 1, never 0.
+- Drawing: a sea point is drawn as water, at the ripple height of "Water rendering" (0..62, about 32 on average),
+  not at 0; every other point is drawn at its own height. The land colour row is `height + 75`, plus 75 more for a
+  land point, so a sea corner of a shore quad takes row 75 and land starts at row 150. In 25 of the 36
+  `bigf0-X.dat` themes the rows below about 130-150 are water colours, so low land picks up water-coloured
+  speckle through the disp jitter (up to about ±40 rows at that altitude): in level 19's theme (13, `d`) 21 % of a
+  height-1 point's pixels, 12 % at height 8, none from about 40.
+- Simulation: `is_land_at` and the drowning check read the cell's shape; a shore cell is land only inside an 8 × 8
+  mask of 64-unit pixels, and every mask is a band 2 pixels (128 units) wide along the land corners: a cell with
+  three land corners is still mostly water. Open sea (shape 1) is all water, shape 0 all land.
+- The flooding check of buildings is the one exception: it counts footprint points at height <= 0 directly.
+- Level 19: the inlet next to the red boat hut (cell 68, 84) is a block of height-1 points in the level file. In
+  the original the boat hut pulls the cells its footprint marks as its water part towards 0, 2 per turn, every
+  turn, whatever their current height ("Terrain changes: what reacts"); once the inlet points there are 0 and so
+  are their neighbours, they are sea and drawn as water. That is the likely reason the original shows water there
+  (unverified: read those heights live a few turns into level 19).
 
 ## Walking speed [exe]
 Each person type has a movement profile (table 0x5A7B90, 26 bytes each, picked by unit+0x30) whose speed at +4 is
@@ -3465,8 +3918,8 @@ generator `0x89D178`; checks run on the unit's own `class_counter` (`+0x2E`), so
 ```text
 sub-state 5 (standing), every turn:
     if class_counter & 31 == 0:              # every 32 turns, 2.7 s
-        if rnd() & 31 > 18:  sub = 6         # 13/32: a short shuffle (face a new way, step, 4-31 turns as
-                                             #   sub-state 7), then back to 5
+        if rnd() & 31 > 18:  sub = 6         # 13/32: a shuffle, a turn on the spot held 4-31 turns as
+                                             #   sub-state 7 (below), then back to 5
         if rnd() & 63 > 60:  sub = 10        # 3/64: the bored pose; wins over the shuffle
 sub-state 10 (bored pose), first turn:
     brave        -> object 0xA1 (anim 89, scratching)
@@ -3490,9 +3943,55 @@ each turn: timer -= 1; when it reaches 0, or the animation reaches its last fram
   own last frame usually ends the pose first.
 - The live trial in "Tumbling and ground recovery" saw sub-states 4→5→10→5→6→7 on a brave that had landed: the
   same loop, the 10 there being a scratch.
-- Not here: the spy's juggling (anim 92, object 0xA4); no write of that object was found in this loop, its trigger
-  is open. The `+0x82` gate on the warrior/firewarrior pose is not understood (`+0x80..0x82` is the remembered
+- **The spy never juggles** [exe]: the juggling (anim 92) has its own entry in the person object table, with the
+  spy's outfit, but nothing in the exe ever selects it - no code sets that object, and no per-type action table
+  holds it (re-checked 2026-11-27). A spy reaching sub-state 10 does nothing and is back to standing next turn.
+  The `+0x82` gate on the warrior/firewarrior pose is not understood (`+0x80..0x82` is the remembered
   spot plus a facing nibble).
+
+The shuffle (sub-states 6 and 7, 0x4D79D5) takes no step: it is a turn on the spot.
+```text
+sub-state 6 (the turn after the roll), then straight on to 7:
+    hold = 4 + rnd() % 28                                 # 4-31 turns
+    heading goal = current heading + 768 if hold is odd, - 768 if even      # 135 degrees (2048 a full turn)
+    with the snap flag (+0xC bit 0x200000): the person physics sets the heading to the goal in one turn
+sub-state 7: hold -= 1 each turn; at 0: back to standing (sub-state 5), steer goal = its own spot
+```
+- Speed stays 0: it was zeroed when the person reached its spot (sub-state 3 puts it exactly on the spot) and
+  neither sub-state sets it, so the person physics only turns it. The new facing stays: the goal at the end is the
+  spot it already stands on, so there is no turn back, and the facing drifts by ±135° from shuffle to shuffle.
+- The pose does not change (standing, or holding wood): on screen, a person turning round, standing a while.
+- The sign comes from the hold's parity, so both draws are the one lockstep roll.
+
+### Worshipping the shaman (person state 19, sub-state 9) [exe]
+Followers standing idle near their shaman kneel and pray to her. It is a sub-state of the standing loop
+(`0x4D73E0`, "Bored poses"), so any order ends it like any idle moment. The shaman recruits; her own state does
+not matter.
+```text
+recruit (0x4E0270(person, cap)), does nothing unless the person is a shaman (type 7) and her
+        class_counter & 7 == 0 (every 8 turns, her own phase):
+    the 3 x 3 cells around her cell, her own included (whole cells of the map grid, not a distance)
+    every person of her tribe there, not herself, in state 19 at sub-state 5 (standing), 7 (holding a shuffle
+        turn) or 8 (settling): sub-state 9, turned to face her; stop after `cap` recruits
+    cap 1:   the per-person turn (0x4D333E) calls it for every person in every state, so a shaman walking,
+             casting, fighting or praying still draws one more worshipper every 8 turns
+    cap 200: her state 42 sub-state 5 (the shaman standing at her reincarnation site, state set by
+             `process_tribe_1`): everyone eligible at once
+worshipper, sub-state 9 (0x4D7BA6):
+    first turn: prayer pose (person action 3: anim 8 for types 2-6), timer = 32, prayer cycle reset
+    every turn: the prayer cycle (0x4D6B10): the arms go up and down once, then hold still 4-11 turns, again
+    every 4 turns (own class_counter & 3 == 0): turn to face her
+    timer out (32 turns): her tribe still has a shaman within 2360 units (4.6 cells) on both axes: timer = 32
+                          else: back to standing (sub-state 5)
+```
+- Recruiting reach: the eight cells around hers and her own, so 0.5 to 2 cells away depending on where both stand
+  in their cells; staying reach: 4.6 cells per axis, checked every 32 turns (2.7 s), the worshipper turning to
+  follow her meanwhile.
+- One worshipper per 8 turns (0.67 s) away from the reincarnation site: ten idle braves around her take about
+  80 turns (6.7 s) to all kneel. Walking, working or carrying followers are not recruited.
+- No type filter: every follower type (2-6) can be recruited, and so can a ghost (no ghost check). The wildman row
+  of action 3 is empty, and wildmen are another tribe anyway.
+- The hold between two arm cycles comes from a second generator (`0x89BC72`), not the lockstep one: cosmetic.
 
 ## Wildmen [exe]
 A wildman (person type 1) cannot be given an order: state 1's per-type next-state table ("Idle behaviour") routes
@@ -5010,14 +5509,24 @@ cross-confirming both readings), never a spy's disguise byte. A second, differen
 (if the countdown is 0, returns the REAL tribe; else the apparent one - the opposite split from `0x4DE7B0` above),
 has only 2 confirmed callers, neither fully reconciled with `0x4DE7B0`'s own framing (below) - open.
 
-The same split feeds the spy's own rendered tribe-colour, in both the main 3D view and the strategic globe view:
-while the transition is running, the spy's OWN viewer (the tribe currently looking at it matches its real tribe)
-sees it blink between real and apparent colour every couple of turns (`simulation_turn`, the per-turn counter,
-bit 0x2 - a parity flicker, not a fixed interval); once settled, it shows the apparent tribe steadily - **the
-"blink to the other tribe's colour, then settle" the player described**. An outside observer (a different
-tribe looking at it) uses the second accessor (`0x4DE720`) instead, with no blink - just a hard cut between
-real and apparent once the transition ends, consistent with the vulnerable window being real to everyone, not
-just a cosmetic preview for the owner.
+The same split feeds the spy's rendered tribe-colour. In the main 3D view (re-read 2026-11-27) there is no
+viewer check: while the transition is running EVERY viewer sees it blink between real and apparent colour
+(`simulation_turn` bit 0x2: 2 turns each); once settled, it shows the apparent tribe steadily - **the "blink to
+the other tribe's colour, then settle" the player described**. Only the minimap globe's dots split by viewer:
+the owner gets the blink, any other tribe the second accessor (`0x4DE720`) - real colour until settled, then a
+hard cut to the apparent one.
+
+**Look: another tribe's spy is always drawn as a plain brave [exe, 2026-11-27]**. Every spy carries a
+render flag from birth, and the 3D renderer, for a flagged unit whose REAL tribe is not the local player's,
+swaps its draw class for the one three entries earlier - the spy's for the brave's (and the spy's arson
+pose's for the brave's equivalent) - whose outfit is none. So:
+```text
+viewer = the spy's own tribe   -> the spy outfit (long dark hair, `0x20/3` layer), colour as above
+any other viewer               -> a brave: no outfit layer, whatever its disguise, settled or not, while
+                                  setting fire too (anim 17 drawn plain); colour as above
+```
+An undisguised enemy spy therefore looks like an enemy brave, and a settled one disguised as you like one of
+your own braves; the firewarrior layer of anim 17 is never used for a spy.
 
 **What un-disguises a spy - the complete caller map of the reveal primitive (`0x4DE7F0`, every call site in
 the exe checked, 2026-11-12)**, i.e. the full list of ways a disguise ends:
@@ -5041,15 +5550,22 @@ the exe checked, 2026-11-12)**, i.e. the full list of ways a disguise ends:
   spy of the imitated tribe, any other tribe's spy will do
 - being discovered: an ENEMY-AI TASK (not a passive engine rule, and no spy of its own needed) walks a target
   tribe's person roster (or its buildings) looking for units that currently count as the AI's own tribe -
-  i.e. spies disguised as it. For each one found it rolls the shared LCG mod 100 against a per-tribe percent
-  (the same table the arson outing roll uses; live 45 for every AI tribe in a level-25 save) and, failing
-  that, still catches the spy if it has spent more than a per-tribe threshold of ticks in its current state
-  (live 255, ~21 s) - an anti-loitering rule, so a spy standing idle in enemy land is caught for sure; on
-  success it sweeps an area of cells around the spy and un-disguises every enemy person there that currently
-  counts as the sweeping tribe (same-real-tribe and allied-tribe members are skipped via the alliance table).
+  i.e. spies disguised as it - and standing inside the AI's own settlement area (below). For each one found it
+  rolls the shared LCG mod 100 against the AI's own `SPY_DISCOVER_CHANCE` attribute (the same attribute the
+  arson outing roll reads; live 45 for every AI tribe in a level-25 save) and, failing that, still catches
+  the spy if it has spent more than `ENEMY_SPY_MAX_STAND` ticks in its current state (live 255, ~21 s) - an
+  anti-loitering rule, so a spy standing idle in enemy land is caught for sure; on success it sweeps the 3x3
+  cells centred on the spy's own cell (radius 1 cell, settled 2026-11-27) and un-disguises every enemy
+  person there that currently counts as the sweeping tribe (same-real-tribe and allied-tribe members are skipped via the alliance table).
   It only ever matches SPIES: the "counts as this tribe" test is false for every non-spy type, so hypnotised
   people - genuinely recreated in the caster's tribe for the spell's duration, not disguised - are never
-  caught by it
+  caught by it.
+  The settlement area (traced 2026-11-27): every 128 turns each tribe stamps its own bit on the cells of a
+  rounded disc around each of its buildings (standable terrain only; erased again around a building that
+  sinks or is blasted away): radius 10 cells for a human tribe; for a computer tribe set by its script's
+  `SET_DEFENCE_RADIUS` - 5, 7, 9 give radius 4, 6, 8 cells, any other value (and the default) 10. A spy
+  outside every such disc of the tribe it imitates is never rolled for. (The same bit bounds the computer's
+  random-destination searches, so it is plausibly its "defence area" in general.)
 - the arson sequence's own aborts (a genuine member of the imitated tribe standing at the door; the
   post-throw discovery roll) - already documented above
 - the GIVE_UP_AND_SULK AI command's sweep over the tribe's own spies - already documented
@@ -5107,18 +5623,23 @@ the likely match for "a disguised spy sneaks up to an enemy building, lights a f
 takes damage":
 ```text
 substate 0: walk to a point on the target building's own FOOTPRINT - the first footprint cell flagged as a
-  designated wall/perimeter cell (cell flag bit 0x20), snapped to that cell's center (user-observed in play
+  designated wall/perimeter cell (cell flag bit 0x20), within 12 units on both axes (user-observed in play
   and confirmed in the code 2026-11-12: the spy stands at the middle of a WALL, not the door side; the door
-  point is only a path-blocked fallback), within 12 units on both axes of the anchor
+  point is only a path-blocked fallback). Completed 2026-11-27 from the shape file: in the regular
+  rectangular footprints that flag sits on exactly one cell, the MIDDLE cell of the side OPPOSITE THE DOOR
+  (the back wall), whatever side the spy comes from; footprints without one use the door cell instead.
+  Inside that cell the spy stands at the middle of the edge facing the building's centre, 32 units in -
+  i.e. on the footprint's outer ring, pressed against the building's body (a big hut: ~800 units from its
+  centre, matching the live ~830)
 substate 1: settle, then face the door for 10 ticks (exe default, unverified live) - the aim/windup, the "draw
   with fire" cosmetic flag pair set throughout; every tick from here on, also checks for a genuine member of
   the tribe the spy is disguised AS standing right at the door (0x439C30) - a hit calls 0x4DE7F0 (reveal) at
   once, aborting the whole sequence before anything is thrown
 substate 2 (the throw): on entry, attaches a prop (anim/object id 0x65 - plausibly "holding a lit firebrand",
-  a different prop from the conversion-roll's own 0x61/0x62/0x63 trio above) and computes a windup delay from
-  two per-draw-class tables (0x5A6AF8's own byte-offset-3 field, and a table reached through a pointer variable
-  that is zero in the static image, populated at runtime - NEITHER table's real numbers could be read this
-  session, only the formula/shape); once it expires, spawns a real class-7 type-0x1D (29) projectile - the
+  a different prop from the conversion-roll's own 0x61/0x62/0x63 trio above) and computes a windup delay: one full
+  loop of the firebrand animation (anim 17, 12 frames) at its draw class's rate (2 turns a frame) = 24 turns,
+  matching the live measurement below (settled 2026-11-27; the "runtime pointer" table is just the per-animation
+  frame counts built from the animation files at load); once it expires, spawns a real class-7 type-0x1D (29) projectile - the
   firebrand itself - launched from the spy's own anchor toward the door at speed 80 (world units/turn), stamped
   with the spy's own REAL tribe (not the disguise), plays the throw sound (id 0x36), advances. The
   firebrand itself is purely cosmetic: an effect object with its own sprite and a 64-turn lifetime that
@@ -5129,10 +5650,12 @@ substate 3: faces away from the door for 8 ticks (exe default, unverified live -
   same mechanism Lightning's own strike-point handler uses, "Terrain changes"), stamped with the spy's REAL
   tribe as the attacker, advances
 substate 4: settle for 24 ticks (exe default, unverified live) - the withdrawal/cooldown before the order
-  completes. Once, on entry, rolls a "did anyone notice" check: unless a per-tribe byte (0x89DDE7, read but not
-  reconciled live) is already set, rolls the shared LCG against a tribe-relations-keyed percent table (0x960812);
-  on a hit (and outside cheat mode), calls 0x4DE7F0 - **the "the owning tribe notices the arson and your spy
-  gets outed" discovery roll** - neither table's real percentages could be read this session
+  completes. Once, on entry, rolls a "did anyone notice" check (settled 2026-11-27): if the SPY's own tribe is
+  computer-controlled there is no roll at all; otherwise roll mod 100 < the BUILDING OWNER's
+  `SPY_DISCOVER_CHANCE` AI attribute (live 45 for computer tribes; 0, i.e. never, against a human-owned
+  building, whose attribute block is empty) -> reveal (never in a multiplayer game: the skip flag is the multiplayer flag, per 389fec6) - **the "the owning tribe notices
+  the arson and your spy gets outed" roll, which only ever applies to a human player's spy**. (The two
+  "tables" an earlier session read here are just each tribe's controller-type byte and tribe number.)
 ```
 Confirmed to set the building on fire with the SAME mechanism Lightning already uses ("Ground fire, ignited
 trees, and a burning building's flame"), not a separate fire system - once ignited, the existing building-wear/
@@ -5191,20 +5714,35 @@ shaman-only, the attack/move family open to all armed types - the full dump is i
 
 The AI's own spy branch, read in full:
 ```text
-0x4CE2C0's SPY case (entry 0x4CE5F7): gated per-tribe on byte 0 of a 48-byte-stride table (0x960805, keyed by
-  tribe index) - zero skips spy tasking for this tribe entirely this tick
-  the spy's own current person state must not be 25 or 29 (fight/pre-fight) - a spy already fighting is left
-    alone
-  compares the spy's own apparent tribe (0x4DE740) against a target record's own tribe byte: if they already
-    match, does nothing further; if they differ, calls 0x4DE760(spy, target's tribe) - redisguises the spy to
-    match the target, right before tasking it
+0x4CE2C0's SPY case (entry 0x4CE5F7) - corrected 2026-11-27: this sweep runs inside an ATTACK task (task 20),
+  over the spies of the attack party; the 48-byte table is the AI attribute block and 0x960805 is
+  SPY_CHECK_FREQUENCY (F), which gates ONLY the redisguise step, not the tasking:
+  if F != 0 and (the attack task's own run counter & (4F - 1)) == 0 - every 4F runs of that task when 4F
+    is a power of two - and the spy is not in person state 25 or 29 (fight/pre-fight):
+    if its apparent tribe (0x4DE740) differs from the attack's target tribe, 0x4DE760(spy, target tribe) -
+    redisguise it as the attacked tribe (re-arming the 63-turn transition)
+  (F = 0: spies sent with an attack never disguise)
   a per-spy sticky flag (+0x10 bit 0x40, "already tasked this round") then gates whether a single pre-picked
     target building, if not already burning (state 4), gets kind 15 directly; failing that, walks a 10-entry
     worklist of candidate building ids for the first one not already burning and issues kind 15 on it instead
 ```
-**So the AI doesn't send one spy to burn one building - it maintains a worklist of up to 10 target buildings
-and systematically works through it with its idle spies, redisguising each as needed and skipping anything
-already on fire**, until the worklist is exhausted or no eligible spy remains.
+**So an attack party's spies don't each burn one building - the attack keeps a worklist of up to 10 target
+buildings and its spies work through it, redisguised as the attacked tribe every 4 x SPY_CHECK_FREQUENCY runs
+of the attack task, skipping anything already on fire**, until the worklist is exhausted or no eligible spy
+remains (the worklist's filling, 0x4F5950 around the attack's target, is not traced).
+
+**Sabotage raids are a separate task (task 13, traced 2026-11-27)**, enabled by the script's `STATE_SABOTAGE`
+(it is the task-type enable bit 13), considered by the AI's "decide on a new goal" pass (~every 64 turns):
+```text
+enqueue a raid only if: the tribe's active raids (task-13 slots) < MAX_SPY_ATTACKS, and it has >= 1 spy
+target: a random enemy (non-allied) tribe, then a random one of that tribe's buildings (walls excluded) -
+  not the nearest
+the raid: one spy picked by the shared worker finder, disguised as the target's tribe, sent to the building,
+  arson (kind 15), then a move back (the chain "0x4C9340" documents in pop3-rev functions.tsv)
+```
+So `MAX_SPY_ATTACKS` is the number of sabotage raids (one spy each) a computer tribe runs at once, and
+`SPY_CHECK_FREQUENCY` is how often spies marching with an attack refresh their disguise - neither is the
+discovery task's cadence (that task's own rhythm is not traced).
 
 #### Open questions
 - ~~The player-facing command path for disguise~~ RESOLVED live 2026-11-11, ARM half traced 2026-11-12 (see
@@ -5215,8 +5753,10 @@ already on fire**, until the worklist is exhausted or no eligible spy remains.
   armed-pointer-action candidate list never offers kinds 13/14/15 despite their spy-only type masks (see the
   "Settled statically" paragraph above); arson and the newly-found wood-pile arson (kind 13) are AI-only /
   orphaned respectively, and the in-play "I set fires myself" memory needs another explanation.
-- The real numbers behind the windup delay (two tables, one of them a runtime-populated pointer) and the
-  discovery-roll percentages (`0x960812`, `0x89DDE7`) - formulas and shapes only, no live values.
+- ~~The real numbers behind the windup delay and the discovery-roll percentages~~ SETTLED 2026-11-27: the
+  windup is one loop of anim 17 (24 turns), the post-arson roll is the building owner's `SPY_DISCOVER_CHANCE`,
+  rolled only for a human player's spy; the discovery task's sweep is the 3x3 cells around the spy, and it only
+  rolls for spies inside the AI's settlement area (substate 4 and "What un-disguises a spy").
 - ~~`0x4DE720` vs `0x4DE7B0`'s disagreeing framing~~ RESOLVED 2026-11-12: a byte-level re-read shows the
   earlier description of `0x4DE720` had its branches swapped; both apply the same rule (real tribe during the
   transition, disguise after).
@@ -5355,8 +5895,10 @@ range (0x51F990), a square per axis around the firewarrior:
   file (80 % at band 0 .. 150 % at band 7), reach per axis: bands 0-1 9 cells (2360 units), band 2 11 (2872),
   bands 3-4 13 (3384), bands 5-6 15 (3896), band 7 17 (4408); a drum tower adds 4 before the odd step
   (exe: 100 % everywhere, 11 cells)
-throw (+0xA8 = 0x2C): anim 7 (the firewarrior throwing fire, 5 frames, 1 turn each), speed 0 (half its speed
-  when aboard a vehicle), and at once fire(self, target) (0x51FBF0):
+throw (+0xA8 = 0x2C): anim 7 (the firewarrior throwing fire, 5 frames, 1 turn each), speed 0 (halved instead
+  when aboard AND aloft, `+0x10` bit 0x2000000: only in a balloon; in a boat it is 0 - and neither slows the
+  vehicle itself, see "Driving: the driver is only a moving/stopped switch"), and at once fire(self, target)
+  (0x51FBF0):
     two shots 8/6, one per hand: started 96 units to the left and to the right of the thrower, at its height
       + its own height (+0x1C) + 16; launch sound 0xA1
     only the second (right) one hits; the left one only flies (its arrival does nothing)
@@ -5411,7 +5953,8 @@ Drawn:
   kept sliding for up to 10 turns, probably downhill: "Person physics"). The fight's knockback (sub 7): about 50.
 - Damage fits `FIGHT_DAMAGE × life / max_life` only with each person's own maximum (`+0x6C`), which is not always
   `LIFE_<type>`: these braves fitted about 800 (tribe 0) and 970 (tribe 1), and a warrior's blows (270-320 against
-  braves) fit about 1450-1620 instead of 1800. Where the maximum comes from is open.
+  braves) fit about 1450-1620 instead of 1800. Explained since: the maximum is rolled per person in
+  [3/4 `LIFE_`, `LIFE_`) ("Starting and maximum life").
 - Healing, outside and inside fights, every 8 turns (turns that are multiples of 8): brave and preacher +4,
   warrior and firewarrior +6, as traced ("Health and healing").
 - A second capture (4 tribes, about 1700 turns) adds:
@@ -5492,6 +6035,37 @@ low health (+0x14 bit 0x1000, the sparkles) = life <= max_life / 4
 | firewarrior | yes | 6 | 9 | 700: 78 s |
 | shaman | yes | 32 | 48 | 2000: 42 s |
 | angel of death | no | | | |
+
+### Starting and maximum life [exe, measured]
+Every new person goes through `init_person` (0x4D5920). `LIFE_<type>` (person table `+0x10`) is the
+`constant.dat` value at run time: `read_levels_const` writes the file's `P3CONST_LIFE_*` lines over the exe defaults
+before any person exists.
+```text
+L = LIFE_<type>
+type heals (person table +0x30 bit 0x8: every type but the wildman and the angel):
+    max_life (+0x6C) = L * 3/4 + rng() % (L / 4)       # integer divisions; one less on level id 12 (0x89C6DD)
+    life (+0x6E)     = max_life
+else:
+    max_life = 0, life = L                               # the life step's caps and the 1/4 sparkles never apply
+brave (init_unit_type_1 case 2) of tribe 0 under global flag 0x89C668 bit 0x4: the same roll on 2 * L
+```
+
+| Type | `LIFE_` exe / file | Starting = maximum life at run time |
+|---|---|---|
+| wildman | 32 / no line | 32, fixed (no `LIFE_` constant names it: exe table only) |
+| brave | 1400 / 1000 | 750-999 |
+| warrior | 1800 / 1800 | 1350-1799 |
+| preacher | 1400 / 1100 | 825-1099 |
+| spy | 1400 / 600 | 450-599 |
+| firewarrior | 1200 / 700 | 525-699 |
+| shaman | 900 / 2000 | 1500-1999 |
+| angel of death | 10000 / 10000 | 10000, fixed |
+
+- Matches the fight capture ("Measured"): braves fitted maxima of 800 and 970, warriors 1450-1620, and wildmen
+  read 32. The roll uses the one game generator, so it is part of the lockstep stream.
+- `0x89C668` bit 0x4 is a special-level flag: set when level id 54 (a save of it) or 79 is loaded and at
+  0x4B1E4E, cleared on every other load. Campaign play has it clear. Its role is not named; it also skips the
+  stranded damage and changes Blast's push ("Blast push and flight").
 
 - The heal amounts are not named constants (`constant.dat` cannot change them). The live capture of "Combat" shows
   the same +4 (brave, preacher) and +6 (warrior, firewarrior) on the turns that are multiples of 8, inside fights.
@@ -5577,20 +6151,34 @@ splash, every turn (effect state 52):
   out from that tribe's camera focus, behind its yaw), so the drowning pose is shown front-on to that player.
 
 ### Stranded [exe, measured]
-Our `Action::Stranded` (units.md) is person state 33 (`pop3-rev/docs/person_states.tsv`, `0x4D9650`, already
-traced and live-cross-checked in an earlier session - full detail there, not re-derived here). Entered when the
-generic movement-step helper finds the next step blocked by the mover's own per-type terrain-climb limit
-(`WALK_ALT_DIFF2`), with no path around it. The numbers our `STRANDED_DAMAGE`/`STRANDED_HURT_EVERY` guessed at
-are both off:
-- **A grace period exists before any damage at all**: a timer climbs by 7 every qualifying tick (same every-8
-  rhythm as invisible/shield/bloodlust/hypnotised) toward a ceiling of `0x160` (352, ~50 qualifying ticks) or
-  `0x360` (864, ~124 ticks) - which one picked by an unidentified per-tribe byte (`tribe+0xC1F`, not traced
-  further - plausibly human vs. computer). Flat 32 instead under a global debug/cheat flag. Ours deals damage
-  from the very first tick, no grace window.
-- **Damage is 56 life, not 20**, every 8 ticks once the grace ceiling is reached (not 4) - 1.5x our rhythm and
-  2.8x our amount, no clean scale factor between them.
-- Meanwhile it keeps retrying: up to 8 waypoints via the same blocked-step check, falling back to the per-type
-  default state on several exits - matches our "walks again once the terrain opens a path" already.
+Our `Action::Stranded` (units.md) is person state 33 (`pop3-rev/docs/person_states.tsv`). Entered when the generic
+movement step finds the next step blocked by the mover's own per-type climb limit (`WALK_ALT_DIFF2`) with no way
+round (any type, the shaman included). `STRANDED_DAMAGE` is not a named constant in the exe or `constant.dat`: the
+value is a literal in the state's handler (0x4D9650).
+```text
+entry (0x4D9580): timer (+0x70) = 0, arms-up pose (0x5A6D50 row 0, row 4 when carrying wood), sub-state 0
+    option flag 0x89D17C bit 0x2: life = 0 (dies at once)
+    else, a unit of the local player blocked within 2 turns of the player's move click: sound 0xE1 (the
+    shaman 0xE2) and advisor message 0x25B ("no entry", "Notifications")
+every turn with class_counter & 7 == 0 (every 8 turns, at the person's own phase):
+    ceiling = 32   if its tribe has flag +0x941 bit 0x40 (no breeding: the wildmen's)
+              352  if its tribe is human (+0xC1F == 2)
+              864  otherwise (computer)
+    timer < ceiling: timer += 7                       # the grace period: no damage
+    else, unless global flag 0x89C668 bit 0x4: life -= 56
+the life step (0x4D43A0) still runs in state 33: heals as anywhere, on turns that are multiples of 8
+then the escape attempts (sub-states 0-3, up to 8 waypoints through the same blocked-step test), and the
+    per-type default state on their exits: walking again once the ground allows it
+```
+
+| Tribe | Grace (8-turn checks) | Grace | Then | Full person dies after the grace (estimate) |
+|---|---|---|---|---|
+| human | 51 | 408 turns, 34 s | 56 per 8 turns | brave (≤ 999, +4 heal): about 20 hits, 160 turns, 13 s; shaman (≤ 1999, +32 heal): about 84 hits, 670 turns, 56 s |
+| computer | 124 | 992 turns, 83 s | the same | the same |
+| wildmen | 5 | 40 turns, 3.3 s | one hit kills (life 32) | 48 turns, 4 s, from stranding |
+
+- Leaving the state and coming back restarts the grace (the entry zeroes the timer).
+- `0x89C668` bit 0x4 is clear in campaign play ("Starting and maximum life").
 
 ### Death and the spirit rise [exe]
 Death (state 3, `0x4D5CF0`, entered when life ≤ 0) does the shaman-specific mana-loss ("Shaman death") inline,
@@ -5693,10 +6281,46 @@ confirmed by this pass.
   (roll, `0x47FA30`), 2048 per turn: the sinking, beaching and spinning below are these angles, not other models.
 - Heading at creation (0x463BA0, called by the type inits 0x463220-0x46333D): on a coast cell, away from the shore
   (cell shape direction + 4, × 256).
-- A parked balloon (state 2) floats at ground + 200 (+0xF); a moving one samples the ground ahead (0x4E8F00).
-  A moving balloon bobs: height ± (`+0x2E` & 15 folded to 0..8) × 128 / 256 every turn, carrying its passengers.
+- A parked balloon floats at ground + 200 (+0xF, 560 over a building or tall scenery); a moving one samples the
+  ground ahead (0x4E8F00). Every balloon bobs, parked or not, carrying its passengers: "Balloon height,
+  look-ahead and bobbing" below.
 - Sounds: moving loop 0x4F (boat) / 0x4E (balloon), started with flag 0x40 (0x48A050) and stopped when it parks
   (0x48A770); destruction 0x4D (boat) / 0x4C (balloon), played on the blast.
+
+### Balloon height, look-ahead and bobbing [exe]
+Answers TODO.md "Balloons". The hover update (0x4E8F00) runs at the end of every moving turn (after the
+movement pass 0x4E89A0), and in any state on a turn flagged "re-float" (`+0x92` bit 0x8000: set when the ground
+moved under it, it was pushed, or the previous update had not arrived yet):
+```text
+hover_target(balloon):
+  if its speed (+0x5F) is 0, or +0x92 bit 0x4 (a hold flag, setter not traced): sample only under itself
+  else: sample 3 points straight ahead along its heading (+0x5D), at 2, 4 and 6 × speed
+        (at cruise speed 110: 220, 440, 660 ahead) - NOT under itself
+  sample(p) = ground at p (interpolated) + (cell flag 0x200 building or 0x2 tall scenery ? 560 : 200)
+  target = max(0, highest sample)
+climb towards it: at most 22 up / 16 down a turn (movement profile 13 +0xA / +0x12); within that, lands on it
+  exactly and stops re-floating; otherwise flags itself to re-float next turn
+```
+- 560 and 200 are vehicle table `+0xD` / `+0xF`. The "tall scenery" cell flag 0x2 is kept by 0x44FAD0: set while
+  the cell holds a scenery object whose type has scenery-table flag 0x80000. That is **trees (types 1-6, fruit
+  trees included), totem heads (9), fires (0xA), reincarnation pillars (0xC), portals (0xE), islands and bridges
+  (0xF, 0x10) and the level-scenery types (0x12, 0x13)**; not plants (7, 8), wood piles (0xB), rocks (0xD) or the
+  stump (0x11). So a balloon hovers 560 over a tree or a totem exactly as over a building, never 450.
+- No minimum clearance and no easing: the climb is linear, so a fast approach to a cliff can still be lower than
+  200 over the new ground for a few turns.
+- Speed (movement profile 13, the same 110 for boats, profile 12): cruise `+0x4` = 110 units/turn; while the
+  driver moves, the vehicle's own speed goes up ×56/32 a turn (from at least 10) to 110, a balloon heading 56/2048
+  (10°) or more away from the driver's destination aims at 110/4 = 27 instead; when the driver stops, ×22/32 a turn
+  down to 1 (0x466A20).
+- **Bobbing, every balloon, every turn, in every state** (the common tail of the vehicle turn, 0x463AC6):
+  ```text
+  t = class_counter (+0x2E) & 15;  tri = t <= 8 ? t : 16 - t                 ; 0..8..0
+  d = tri × 128 / 256 (0, 0, 1, 1, 2, 2, 3, 3, 4, 3, 3, 2, 2, 1, 1, 0)      ; negated when +0x2E bit 0x10 is set
+  height += d; every passenger's height += d
+  ```
+  The steps add up to 28 over 16 turns, then −28: a 32-turn (2.7 s) cycle. Parked, nothing pulls the height back,
+  so it swings 28 units peak to peak. Moving, the hover update lands it back on its target each turn (d is never
+  more than 4, under the climb rate), so it only shows as target + d, a ±4 wobble.
 
 ### States
 | State | Kind | Per turn |
@@ -5758,6 +6382,22 @@ board(vehicle, person)  0x4657D0:
   in [player]; the exe rewrites the tribe on every boarding.
 - Anyone can drive: there is no driver type; the vehicle moves when its leading passenger (0x466760) is given a
   move [player].
+
+**Driving: the driver is only a moving/stopped switch [exe].** The driver is the passenger in seat 0 (0x466760
+moves a passenger with a live order there). Each turn the vehicle reads the driver's own speed `+0x5F`, but only
+tests it against 0:
+```text
+parked (0x463E80): driver speed != 0 and its boarding wait (+0x9A) over  ->  moving state
+moving, driver speed == 0  ->  vehicle speed ×22/32 a turn (1 below 6); parks at the next cell centre once <= 1
+moving, driver speed != 0  ->  vehicle speed towards ITS OWN profile speed +0x4 (110, boat and balloon alike):
+                               ×56/32 a turn from at least 10; a balloon turned 10° or more off the driver's
+                               destination (+0x53) aims at 110 / 4 = 27 (0x466A20); steers to that destination
+```
+So a passenger's speed never scales the vehicle's. A firewarrior throwing from a balloon (its own speed halved,
+"Firewarrior fire") changes nothing unless it was already at 0 or 1; in a boat its speed is set to 0, so only when
+that thrower is the driver does the boat take it as "driver stopped" and slow down and park (how soon the
+driver's speed comes back after the throw is unverified). Entering any state, a firewarrior aboard whose cached
+order kind is 0x15 (auto-attack) also gets speed 0 (0x4D30CC).
 - Getting on and off [player]: the person walks under the vehicle or within 1-2 cells of it, then jumps on
   (boat) or the balloon lands on it; getting off is the reverse. A passenger stays selected, and a move order
   given to it moves the vehicle instead. The vehicle's tooltip has the unload button; clicking the ground
@@ -6030,6 +6670,97 @@ each of the 6 individual bytes tracks beyond `0x89D167` itself (the "a fight inv
 documented above). Worth adding as a real action once the notification system itself is built - see TODO.md
 "Notifications".
 
+## Player input: the keymap and HUD clicks [exe]
+Every key press and release, and every mouse-button press and release over the 3D view, goes through one table:
+the keymap. The exe ships a default keymap (188 bindings, a static table) that a saved keys file can override at
+start. The keyboard handler tracks the modifier keys itself, then looks the event up; the mouse handler does the
+same for the three buttons, which the keymap treats as three extra keys (left, right, middle).
+
+```text
+binding = (key, press_or_release, modifiers, condition, player_command)
+  key: a scan code (arrows, F-keys, Enter, Esc, Backspace, Tab, the mouse buttons), or a character
+       ('p', ' ', '+', '1'...) turned into the layout's scan code at load
+  modifiers: required set and tolerated set over {Shift, Ctrl, Alt} (left or right key alike), or "any"
+    matches when (held | tolerated) == (required | tolerated)
+  condition: an optional predicate on the game's mode ("a building plan is held", "a flyby is running"...)
+on a key event:
+  if a chat line is being typed: the key goes to the line editor, never to the keymap
+  if a message box is open: only Esc and Space do anything (below)
+  if the level status screen is open (below): a press closes it
+  else: walk the bindings of that key in table order; the first whose press/release and modifiers match and
+        whose condition holds wins, and its command runs (with the cursor's position)
+```
+- Bindings of one key are tried in table order, so a key has a priority list, not one meaning. **Space** has
+  four, tried in this order:
+  1. a building plan is held: turn the plan a quarter turn (4 orientations, a click sound);
+  2. a level flyby is running: skip it ("Flyby cancel");
+  3. the level is won or lost (any modifiers): open the level status screen (below);
+  4. otherwise: jump the camera to the current combat alert, if one is pending (nothing happens if none is).
+- The level status screen: `S` toggles it during play; after a win or a loss Space opens it (hiding the side
+  panel, and pausing outside multiplayer). While it is open the HUD overlays are not drawn and the next key press
+  closes it; after a win or a loss only Space does. (That this flag is the status screen is inferred from `S` and
+  Space sharing its command, not checked live.)
+- While a message box is open: Shift+Esc closes the box, Esc alone opens the in-game menu; Space only acts at the
+  end of a level (the status screen above); every other key is ignored.
+- The keymap also explains several earlier ambiguities: Esc is bound to seven commands, each under its own
+  condition (close a plan, a query, the menu...), which is why one key looked like many commands.
+
+### Chat (multiplayer) [exe]
+- `M` opens the chat line (only in a networked game, unverified: the gate is a game flag earlier notes called
+  "cheat mode"). While it is open every key edits the line (insert at the cursor, at most 80 characters), Enter
+  sends it, and the game's other keys do nothing meanwhile.
+- The chat panel holds a 2 x 2 block of recipient toggles, one per other tribe plus "All", each a name box next to
+  a tick icon. Clicking one toggles it; turning "All" on ticks the three tribes too; ticking the last unticked
+  tribe ticks "All"; unticking one tribe unticks "All"; the last ticked recipient cannot be unticked.
+- On send: with nothing ticked or "All" ticked, one broadcast; otherwise one message to each ticked tribe.
+
+### Right-click query [exe]
+- Pressing the right button over the world (nothing held, no modifier) queries what is under the cursor: the
+  hovered thing first, then the cell's occupant, by a per-class lookup. If something answers, the query shows and
+  stays while the button is held; it is refreshed every frame, and closes once the button is up and the cursor has
+  left the queried thing. Releasing the button only ends the "held" part. The tab switches are separate keys
+  (Insert, Home, PgUp), not these commands.
+
+### Holding a building plan [exe]
+Picking a building on the panel puts the game in a "plan held" input mode; the keymap then gives the mouse and
+Space plan-specific meanings (each binding's condition is that mode):
+```text
+left button released, no modifier      -> place the plan, then stop holding it
+left button released, Ctrl or Alt      -> place the plan and keep holding it (several plans)
+  walls (type 10) stay held even without Ctrl
+  guard post (type 17): a free cell queues a guard post; a cell already marked for a guard post removes the
+    marks there; anything else is refused
+  other types: placed directly, except under one game option (not identified) where an extra site check (not
+    fully read) must pass and the click then queues a different command (not identified)
+  placed: click sound 0x24; refused: error sound 0x25 and the plan stays held
+Space (no modifier)                    -> turn the plan a quarter turn (4 orientations, sound 0x26)
+right button released or Esc           -> put the plan away (back to the normal input mode)
+Shift + right button released          -> remove the player's plan under the cursor, or a guard post marker
+```
+
+### Followers panel icons: click, Ctrl + click, Shift + click [exe]
+The followers panel has a shaman icon above a row of five type icons (brave, warrior, firewarrior, preacher, spy)
+and an "all" icon at the row's start. The modifier is read on the click itself (Shift tested first, so Shift wins
+over Ctrl), and each click queues one player command carrying the type and the camera's cell:
+```text
+type icon:   click         -> select ONE: the best not-yet-selected follower of that type
+             Ctrl + click  -> repeat that pick MULTIPLE_SELECT_NUM times (5): the 5 best
+             Shift + click -> select EVERY follower of that type (no count limit)
+"all" icon:  click / Ctrl + click -> the same picks over every type except the shaman
+             Shift + click -> select every follower except the shaman
+shaman icon: click (or Shift + click) -> select the shaman (if the tribe has one); Ctrl does nothing different
+"best" pick: among the tribe's selectable, not yet selected people of that type (never the shaman), take
+             them by activity group (a 3-bit field of the person, groups tried in the order 0, 2, 4, 3, 1, 5, 6;
+             what each group means is not traced), and within the first group that has any, the one nearest
+             the camera's cell
+```
+- The clicks are ignored in a few game and input modes (not identified).
+- A picked follower inside a vehicle brings the vehicle's other passengers along (unverified: the call it makes on
+  them is not read). After a pick the input mode becomes "followers selected" (orders by click).
+- Shift + click uses a looser "can be selected" test than the other two: it accepts a flag the others refuse;
+  the shortcut list's "spies included" may be that flag (unverified).
+- Whether a click first clears the current selection is not traced (the commands only add the "selected" flag).
+
 ## Native AI: how a computer-controlled tribe actually decides what to do [exe]
 This is the ENGINE's own autonomous behaviour for a computer-controlled tribe - separate from PopScript, the
 level-author scripting language `ai-scripts.md` documents. The two interact (a script can set flags the engine
@@ -6220,7 +6951,7 @@ or wood pile on it with the player's tribe (below). Its shapes are rings from `d
 `[r, r+1)` (ring 0 = 1 cell, 1 = 8, 2 = 16, 3 = 20, 4 = 24, 5 = 40, ...). "Disc r" = rings 0..r, the cells
 closer than r + 1 to the centre. Offsets wrap around the map like everything else.
 ```text
-mode 1  explore the whole map  - only on losing in cheat mode (game_flags_1 bit 0x8); mode 0 (un-explore all) unused
+mode 1  explore the whole map  - only on losing in a multiplayer game (game_flags_1 bit 0x8, "Reservoir"); mode 0 unused
 mode 2  disc 5 around a cell: 109 cells, 11 cells across (radius about 5.9 cells)
 mode 5  disc 14: 697 cells, 29 across, without the per-cell texture refresh (the caller redraws)
 mode 3  one cell (mode 4: the same without texture refresh)
@@ -6286,7 +7017,7 @@ trees: wood is found through "wood-search zones" (up to 120 records of 24 bytes 
   pile (scenery 1-6 and 11, scenery-type flag +0x14 bit 0x4) is added to those zones when its cell becomes
   explored (0x494F50): the player's braves do not go for wood they have not discovered; the AI's do
 ```
-Cheat mode (game_flags_1 bit 0x8) bypasses the tree filter.
+A multiplayer game (game_flags_1 bit 0x8, not a cheat flag: "Reservoir") bypasses the tree filter.
 
 ## Low-quality sound bank codec [exe, measured]
 `soundd2low.SDT` (loaded instead of `Soundd2.sdt` when the "high quality sound" option, `0x895DA8` bit
@@ -6321,6 +7052,38 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 `FMV\*.tgq` movies, not by any sound bank.
 
 ## Impact on our specs
+- terrain-textures.md / `terrain_texture::looks_like_sea` (`VISUAL_SEA_HEIGHT` 4) and `game_core::unit::is_sea`
+  ("Sea, shore and land"): the original has no height threshold. A point is sea when it and its 8 neighbours are
+  all at 0, the cell shape comes from its 4 corners' sea bits, and both the water drawing and the simulation
+  (walking, drowning) use that same shape; a shore cell is land only in a 128-unit band along its land corners.
+  Ours: a cell is sea when its 4 corners are exactly 0, and the client widens it to 4. Drop `VISUAL_SEA_HEIGHT`
+  for the 3 × 3 rule, draw sea points at the ripple height, and make the boat hut pull its footprint's water part
+  to 0 whatever its current height (`foundation::pull_target` only pulls cells that are already water), which is
+  what turns level 19's height-1 inlet into sea in the original. Also: a height-0 point whose 4 cells are all
+  land is raised to 1.
+- units.md "Worshipping the shaman" / `units/worship.rs`: ours makes every idle follower within 3 cells per axis
+  of an idle or walking shaman pray at once. The original ("Worshipping the shaman"): recruited from the 3 x 3
+  cells around her own cell, whatever her state (casting and praying included), at most one per 8 turns at her
+  phase (all at once only at her reincarnation site), only people standing still; kept while she stays within
+  4.6 cells per axis (checked every 32 turns, facing her every 4); the arms cycle once then hold 4-11 turns.
+- spells.md "Flatten" (`game_core::flatten`): the curve matches ours (`h += (T - h) / turns_left`, truncated, 15
+  turns, exact on the last). Three differences ("Flatten (effect state 31)"): the target height is the ground
+  interpolated at the exact cast point (ours: the nearest height point's own height); the 45 points are taken
+  around the cast point's cell corner rounded down (ours: around the nearest height point); and a radius from the
+  exact point, 380 units then about +341 per turn, decides when each point starts (ours: all at once), so the
+  outer ring starts on turns 3-7 and catches up with larger steps. Heights are clamped to 0..1024.
+- architecture.md "The tick" (`GameMap::tick`): the original's order is now known ("Order of work inside a
+  turn"). It does not group by kind: one pass runs people, buildings, effects and shots interleaved in creation
+  order, so our per-kind steps 1-3 and 6 are an approximation we keep. What does differ: the computer tribes'
+  scripts run before any unit, not after buildings (our step 4); fights and challenges run before the units
+  (ours: step 5, matches); income and spell charging come last, after the terrain recompute (ours: step 7,
+  matches); a player command is applied at the start of a later turn, never mid-turn.
+- combat.md / `kind_stats.rs`, units.md: every person's maximum and starting life should be rolled once at birth
+  in [3/4, 1) of the kind's life with the game generator (ours: the full value for everyone), and a wildman's life
+  is 32, not ours 1000 (a guess). Stranded (`unit::STRANDED_DAMAGE` 20 every `STRANDED_HURT_EVERY` 4 turns from
+  the first turn): a grace of 408 turns (human tribe) or 992 (computer), 40 for wildmen, restarted on each entry,
+  then 56 every 8 turns at the unit's phase; healing goes on while stranded (ours: none), and the shaman can be
+  stranded too (ours: she stays Idle). "Starting and maximum life", "Stranded".
 - spells.md / `game_core::spell`: Whirlwind is not implemented (`SpellKind::Whirlwind` casts nothing); its
   implementable spec is now spells.md "Whirlwind (to implement)". The original's rules ("Whirlwind mechanics"): 224
   turns (our ticks are turns), 120 units per turn, the 100-turn homing then drifting steer, the bottom-segment cell
@@ -6361,8 +7124,8 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   has `CONV_TIME_*`, 32, no reader found), so they are not the training time.
 - Training cost: `TRAIN_MANA[kind] × trained × BAND%[specialists of that kind]`, `HUMAN_` for controller type 2,
   `CP_` otherwise.
-- The shaman kill reward goes through the delayed reservoir. Which path totem and discovery mana gifts take is
-  not traced.
+- The shaman kill reward and mana discoveries (kind 6) go through the delayed reservoir, with a 50-turn wait in
+  multiplayer ("Reservoir"); nothing else does.
 - Wood, mapped to ours: one load (100) is one piece, a tree's 400 is our size 4, a small hut's 300 is our
   `wood_cost` 3. Our model (one piece moved at the end of the chop) already matches the single transfer.
 - units.md `Chopping`: the original is 20 turns per load, 1.67 s; our `CHOP_TICKS` is the same 20 ticks. Picking
@@ -6412,6 +7175,22 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   It goes when the vault fires, not when the reward lands 82 turns (6.8 s) later; only permanent discoveries have
   one. Ours: 160 above the pyramid model's own top (its points reach 1746, so 1072 would be inside it), kept
   until the top starts closing (the player's choice), no ground light.
+- objects.md "Records" / client `original_models::object_mesh` (model size, "Model size: the per-object scale"):
+  ours draws every model at point / 512 cells and ignores the record's scale, so the original's buildings, huts,
+  vehicles and prison are 1.25 × ours and its pyramid 1.17 × ours (1023 high, 4.0 cells, against our 3.41). The
+  vault icon's 1072 is in terrain height units (4.19 cells), not model units: in the original it is just over the
+  apex, not inside it.
+- buildings.md "Explosion (drawn)": ours lets every polygon lie where it lands and shrink away, gone after 3 s;
+  the original's pieces (one per face, not per polygon pair) vanish on touching the ground with a dust puff and
+  sound 0x13, or a splash in water. See "Flying faces (the partial explosion)".
+- buildings.md "By stage" (client `construction.rs`): ours draws the model's edges as square beams plus the
+  lowest `used / wood_cost` triangles by height. The original draws the same mesh with faces picked by the stage
+  and each face's byte 59 (shown / shown as wood, tile 250), the stage from the 0-4 formula; a damaged building
+  goes back to this drawing (ours: only through wood count, the same view). See "Drawing a building by stage".
+- Discovery feedback (TODO "HUD sparkle/flash when a discovery is granted"): the original plays a cinematic
+  for the player's own rewards, building and spell (details in "Discovery cinematic: the reward flies to the
+  panel"); ours shows nothing. The reward itself is applied when the animation reaches the panel button, not at
+  the grant.
 
 - Reincarnation sites (game-client `sites.rs`, game-core `site.rs`): ours put 8 stones on a round ring of 1.3
   cells, not turned, and flatten radius 3 (blend 4). The original: the octagon above (3 cells, 2.8 on the
@@ -6444,7 +7223,7 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
     answers the "how heights map to the 8 bands" question of "Original balance";
   - `SPELL_<X>_OPT_S` is not a recharge time: no per-spell cooldown exists, only a 1 s cooldown after any
     human cast;
-  - Land bridge: 4 cells wide, minimum height 90 (ours: min 32); Flatten: a 45-cell disc of about 3.5 cells,
+  - Land bridge: 4 cells wide, minimum height 90 (ours: min 32); Flatten ("Flatten (effect state 31)"): a 45-cell disc of about 3.5 cells,
     15 turns (ours: radius 4, instant); Erosion is a hydraulic-erosion simulation over 63 turns on 8 × 8 cells
     (ours: radius 4 lowered by 120); Swamp, Earthquake and Volcano are now described in enough detail to
     implement (see "Per spell");
@@ -6554,10 +7333,10 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   is assigned - no wandering, no autonomous wood-gathering found).
 - `game_core::idle` follows "Bored poses" (the 13/32 shuffle, the 3/64 bored pose drawn by `units::art::bored`,
   one loop, anims 89/91/90, carriers included) but rolls off a per-unit seed on a phase from its id instead of
-  the shared generator and `class_counter`, steps an eighth of a cell (a guess: the step's length is not traced)
-  around the spot it stood on when it went idle (not the remembered `+0x4F`), and ignores the `+0x82` gate on
-  the warrior/firewarrior pose. The spy's juggling trigger is not traced: ours rolls it like the
-  others, one whole loop.
+  the shared generator and `class_counter`, steps an eighth of a cell where the original only turns on the spot
+  by ±135° and keeps that facing (no step, "Bored poses"), around the spot it stood on when it went idle (not the remembered `+0x4F`), and ignores the `+0x82` gate on
+  the warrior/firewarrior pose. The original never plays the spy's juggling (orphaned animation,
+  "Bored poses"); ours rolls it like the others, one whole loop - an `[ours]` addition.
 - Wildmen (`game_core::wildman`; "Wildmen"): the original drives them through a confirmed 1 → 8 → (5 → 15, or
   6 → 16) → 8 loop - first search nearby (12 cells) for a tree or plant, walk to it and eat beside it (5 → 15); only
   if none is near, walk to a nearby shore cell instead (states 6/16, explicitly rejecting inland and open-sea
@@ -6644,6 +7423,31 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   Armageddon its 11-cell arena. Rendering: unexplored terrain black (soft one-cell edge), objects on unexplored
   cells not drawn, minimap dark, tooltip 0x349, sky dimmed when under 50 explored cells are on screen. Gameplay: no building on unexplored cells (message 0x24E), the
   player's tribe ignores undiscovered trees; no effect on spotting, targeting or combat.
+- shortcuts.md / `keymap.rs`: the original resolves a key through an ordered list of (modifiers, condition)
+  bindings, first match wins; Space's order is turn the held plan, skip the flyby, the level status screen after a
+  win or loss (any modifiers), else camera to the pending combat alert (ours: skip the flyby, or look at the
+  shaman in dev mode). Chat (multiplayer only): `M`, an 80-character line, recipient toggles for each other tribe
+  plus "All". "Player input: the keymap and HUD clicks", "Chat (multiplayer)".
+- trees.md "On screen" (`size_factor`, 40 % at size 1 to full at size 4): the original scales a tree by
+  `1/6 + 5/6 × wood / WOOD_VALUE` of its model scale, i.e. 37.5 / 58 / 79 / 100 % at 100 / 200 / 300 / 400 wood,
+  removed below 100 ("Tree size on screen"). Ours is within 3 %.
+- worship.md "Totems (scenery 9)" / client `totems.rs`: every scenery 9 is drawn as the stone head, nodding by a
+  guessed ±6° every 1.6 s. The original picks one of four looks from the trigger on its cell (stone head, stone
+  totem, winged-death totem, totem pole) and animates each by its morph record, only while the trigger is active
+  (the totem pole only while prayed at); "Scenery looks: plants and prayer heads".
+- Scenery 7 and 8 (plants, not drawn by us): hfx 2 and 3, camera-facing sprites like the volcano rock.
+- buildings.md "Blueprint" / shortcuts.md: placing a plan with a plain click stops holding it; Ctrl or Alt + click
+  places it and keeps it held for another (ours: no Ctrl variant); walls stay held anyway; a refused spot plays the
+  error sound and keeps the plan; right click or Esc puts the plan away. Right click on anything queries it: the
+  query stays open while the button is held and until the cursor leaves the thing (ours: right click deselects,
+  hover shows tooltips). "Holding a building plan", "Right-click query".
+- units.md `Action::Building` / `Pose::Hammer` (the axe swing as a stand-in): the original's hammering is anim 11
+  itself, one cycle every 16-31 turns facing the site ("The hammering pose"); ours: `BUILD_TICKS` 5 s a piece.
+- ui-and-editor.md "Stats tab" / shortcuts.md: the original's follower icons pick by distance to the camera, not
+  by unit id: a click adds the best not-yet-selected follower of the type (by activity group, then nearest the
+  camera's cell), Ctrl + click the 5 best (`MULTIPLE_SELECT_NUM`), Shift + click all of them; the "all" icon does
+  the same over every type but the shaman, and Shift + "all" selects everyone but the shaman (ours: `next_unit`, in
+  unit id order within a cell; no Ctrl). "Followers panel icons: click, Ctrl + click, Shift + click".
 
 ## Open questions
 - Convert wild ("Convert wild"): the phase of the effect's own 8-turn counter at birth (measured: first try 2
@@ -6656,8 +7460,8 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 - Fog of war ("Fog of war"): which level is the fog-exempt "level 99" (`0x89A315`); whether the player's own
   people auto-attack enemies standing in unexplored cells (no fog check exists in the code, not tried live);
   whether hidden units can be clicked/selected; whether the D3D sky draws from the dimmed palette entries.
-- Bored poses ("Bored poses"): what the warrior/firewarrior gate `+0x82 & 0xF0 <= 0x10` means, and where the spy's
-  juggling (anim 92, object 0xA4) is triggered.
+- Bored poses ("Bored poses"): what the warrior/firewarrior gate `+0x82 & 0xF0 <= 0x10` means. (The spy's juggling
+  is settled: the exe never plays it.)
 - Where `MANA_F_<PERSON>`, `MANA_F_HOUSED/WORKING/TRAINING` and `MANA_F_HUT_LEVEL_1..3` are applied. Only the max
   of the three activity percentages is stored, and its readers are not traced.
 - What "busy" means (unit+0xE bit 7, unit+0xA7), and the preacher's extra check.
@@ -6737,7 +7541,7 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   `pop3-rev/docs/plans/terrain-white-patch.md`. Not yet traced: what distinguishes the two thing-index roles
   (+0x6 vs +0x8) on the same cell, or the exact object-class/sub-kind values the weighting tables key on - left
   for a future session.
-- Attacking a building: what sets building +0x9C bit 0x40, and the partial explosion's 10/7 units.
+- Attacking a building: what sets building +0x9C bit 0x40. Flying faces: the gravity of 0x4E7A80.
 - Angel of Death ("Angel of Death mechanics" above): the literal `AOD_KILL_COUNT`/`AOD_DURATION` expiry check
   (not found in its hunting AI, state 28/0x4DB980 - plausibly inside the per-kill self-damage cost charged by
   0x4E0A30, or one of the still-unopened outer `+0x2D` sub-states); any building-type exclusion for its attack
@@ -6757,7 +7561,7 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
 - Firewarrior fire: the line-of-fire test, whether a building stops the bolts (5 throws at a still preacher did nothing), what sets the reload
   byte to 252-255 (third capture), what the +0x10 bit 0x400000 set on own people under a passing shot does,
   whether hfx 1124-1127 is the shot's fade, and the approach sub-states (10, 11) before the throw.
-- Combat: where a person's maximum life (`+0x6C`) comes from when it is not `LIFE_<type>`, whether a taunt (48-50) plays to its end (0x4D4DA0
+- Combat: whether a taunt (48-50) plays to its end (0x4D4DA0
   resets a non-idle person to idle the next turn; the per-person `+0x7E` it sets may hold it),
   why pre-fight mode 2 exists as a slower lead-in to the same pull-out-and-throw mode 1 reaches directly (which
   caller passes which mode was not checked), the ground test of a fight's place (0x51E4B0, its own body unread -
@@ -6775,11 +7579,16 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   (The per-tribe base capacity, tribe+0x921, is resolved - see "Huts: breeding and growth".)
 - Prayer: the vault (library trigger) branch, what the "contest" countdown at trigger+0x6F does when several tribes
   pray at once, and whether the gauge resets after the trigger fires when `NumOccurences` allows more.
-- Vault icon height: 1072 over the ground is inside the pyramid model as we draw it (object 191's points reach 1746):
-  is the pyramid drawn smaller in the original, or is the slot-1 point not where the icon is seen?
+- Vault icon height: answered, see "Model size: the per-object scale". 1072 is in terrain height units (4.19 cells)
+  and the pyramid is drawn 1023 high, so the icon is just over its apex.
 - Vault icon: whether the clone discovery's own icon is drawn during its 6 turns (drawable flag 0x80 at +0x35, kept
   by the discovery and cleared by the marker), which glow sprite each animation clock value shows (14 steps, 16
   sprites), what game mode 3 is (no markers), and the ground light's parameters (4, 4, 0).
+- Building stages: the fixed UV set the wood faces use (global 0x87CB03, filled at run time), why medium and
+  large huts have mostly unflagged-as-wood faces, whether the class-9 companion (mesh 51) is drawn.
+- Discovery cinematic: not seen live (frame rate in practice, so the seconds); the fallback start point when the
+  vault is off screen; the sparkle burst's heading; which side of the depth peak releases a face; the mana
+  path (0x4815A0 with the swirl's kinds 5-10); what sprites 318-321 are; panel flag 0x98F746 bit 0x8.
 
 - Physics: what the grounded landing routine 0x4E9950 does, so whether ordinary falls ever hurt.
 - Blast: whether this spell's own `push_k`/`vert_k`/`R` instance fields (+0x74/+0x78/+0x6c, "Blast push and
@@ -6849,6 +7658,11 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | Address | Function |
 |---|---|
 | 0x4ECAC0 | `init_tribe_struct`, "tribe_recount_and_mana_income": rebuilds unit lists, income |
+| 0x4A5590 / 0x4EC6F0 | `main_loop_outer` (command drain, AI, catch-up) / `main_loop_inner` (one turn) - "Order of work inside a turn" |
+| 0x5126A0 / 0x512700 | flatten effect: init (T, 15 turns, spread 5120) / per turn (Ghidra's `process_lightning`, a misnomer) - "Flatten (effect state 31)" |
+| 0x44DF40 / 0x44F980 | terrain recompute (sea bit = blend 0, cell shape via 0x5AA318, land-locked 0 raised to 1) / `is_land_at` (shape + 8 × 8 mask) - "Sea, shore and land" |
+| 0x4ED700 | per-unit class dispatch (11 classes, table 0x4ED7EC), run for every unit of the list 0x890324 (newest first), then the local list 0x890330 |
+| 0x47AAC0 / 0x43E320 / 0x47AC30 | stage / enqueue / clear the local player's command, after this step's commands ran |
 | 0x41AF80 | `get_unit_mana(person)` |
 | 0x4DF0E0 | preacher's extra check in income |
 | 0x41A4F0 | `add_mana`: `tribe->mana_in += amount` |
@@ -6941,6 +7755,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4A7860 | `FUN_004a7860`, "transfer_wood(src, dst, max)" |
 | 0x4A79F0 | removes wood from a tree (tree, -amount, tribe) |
 | 0x495D70 | `FUN_00495d70`, a person's gather-wood state; chop step at 0x4960CC |
+| 0x4958F0 | work sub-state 2, building: the hammer cycle (axe swing, sound 0x14, 16-31 turns) |
+| 0x4D50D0 | stop and play action 6 (the axe swing, anim 11) |
+| 0x497030 | work sub-state 8, levelling a building site: flattening jump (anim 12) or holding wood (anim 10) |
 | 0x4342BF | wood pile pickup: timer 3 (scenery type 0x0B) |
 | 0x4A5590 | main loop; `step_ms = 1000 / turns_per_sec` at 0x4A5595, fixed-step catch-up at 0x4A57B4 |
 | 0x4EC6F0 | one game turn: `turn += 1` at 0x4EC703 |
@@ -6956,11 +7773,25 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4FB1D0 | trigger defaults when created without a level record (`TriggerCount` 1, `PrayTime` 192) |
 | 0x485C82 | level loader, discovery record: kind, reward, availability; a marker (6/10) for each permanent one |
 | 0x4FAAF0 | discovery (6/2) init: state 4, icon sprite, position over a vault's slot 1 or ground + 800 |
+| 0x471C40 | construction renderer (draw class 0xA, buildings in state 1): stage masks `1 << s` / `0x10 << s` from `+0x78`; face loop at 0x4724C3 tests face byte 59 (shown / wood tile 250) |
+| 0x40B170 | a building's mesh `+0x63`: huts a random style (0x6B / 0x77 / 0x83 + size) + tribe × 3, others type table +0x0 |
+| 0x498140 | give a building its wood-stock companion (class 9 type 1, stock = full cost); a built one goes back to state 1 |
 | 0x4FACF0 | discovery per turn (state 4): glow, pickup by a person on its cell with order kind 29, hide after +0x7F turns and cinematic, reward after the 82-turn countdown |
 | 0x4FC570 | discovery marker (6/10) per turn (state 8): icon, position, glow (6/8, hfx 1417) 80 below |
+| 0x481550 | discovery cinematic start, by kind: building 0x4819C0, spell 0x4841B0, other 0x4815A0; plus the sparkle burst 0x481490 |
+| 0x480EA0 | per-frame driver of the cinematics (from draw_1); also draws the button sparkle (struct 0x988A68) |
+| 0x4819C0 / 0x4839F0 | building cinematic: init (mesh, one piece per face, stages 18/22/30/100) / per frame (struct 0x986BA0) |
+| 0x4841B0 / 0x484320 / 0x484870 | spell cinematic: init (stages 1/160/4/160) / per frame (struct 0x98C5A8) / glyph draw |
+| 0x481490 / 0x482290 | sparkle burst init (200 particles, 20 frames) / swirl per frame (struct 0x988A88), shared with the soul swirl |
+| 0x481900 | cinematic start point: the discovery's screen position if visible, else a panel widget centre |
+| 0x44BC10 / 0x44BE00 | screen rectangle of a panel element by id / of a spell's panel button |
+| 0x473210 / 0x472DA0 | building cinematic draw: the exploded mesh and the flight to the button / the whole mesh |
 | 0x4FC790 | marker init height offset: vault slot 1 (0x404540), door point, or 800 |
 | 0x4EF26C | delete, class 6: a discovery takes its marker (same kind and reward) and its glow; a marker takes its glow |
 | 0x485D00 | level loader: trigger record fields to the unit |
+| 0x4A66C0 | scenery look: draw class and model/sprite from the scenery table (+0, +0xA), position variant (flag 0x20), per-instance scale flag for wood holders |
+| 0x4FBD20 | prayer-head look: model and morph state of the scenery 9 on a trigger's cell from `TriggerType` and its flags 0x10/0x20 ("Scenery looks") |
+| 0x4851E0 | level load, triggers: resolve targets, flag 0x20 / 0x10 for a once / permanent discovery target, set the head's look |
 | 0x4C14C0 | `init_unit_type_11`: spell unit, mana, cooldown; cast setup 0x4C1B80 |
 | 0x4C1D10 | spell unit per turn: sub-state 3 waits 6 turns, launches the shot (0x4C21E0), sub-state 2 deflects or spawns the effects (0x4C1EA0) |
 | 0x4C2E30 | cast range with altitude bands; 0x4C24F0 can-cast check |
@@ -7023,6 +7854,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x50D9A0 | earthquake effect 7/0x1A per turn (Ghidra: `process_explode_building`), spawned only by the earthquake spell (spell table effect 26) |
 | 0x50FE60 | effect 7/0xE init: shake one building (−100 wood via 0x4980A0, partial explosion) |
 | 0x4E7FB0, 0x4E8F00 | boat and balloon movement passes (balloon hover height) |
+| 0x466CF0, 0x44FAD0 | balloon hover sample (ground + 560 / 200 by cell flags 0x202); keeps cell flag 0x2 (tall scenery) - "Balloon height, look-ahead and bobbing" |
+| 0x466A20 | vehicle speed: accelerate to profile +0x4 (110) while the driver moves, else decelerate |
 | 0x463370, 0x463780 | vehicle class init (by state) and per turn (by state) |
 | 0x463CB0 | "vehicle_life_step": −1 per turn, refill while moving or manned, destroy at 0, strand on land |
 | 0x466F00 | "damage_vehicle"(vehicle, tribe, amount) |
@@ -7048,6 +7881,8 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x468E1C-0x4694F2 | in `draw_polygons`: health bar, low health, shield, bloodlust, hypnosis and selection markers |
 | 0x525450 | health bar of a person |
 | 0x4D43A0 | person regeneration and the low-health flag, every 8 turns |
+| 0x4D5920 | `init_person`: life `LIFE_<type>`, maximum and starting life rolled in [3/4 L, L) for types that heal ("Starting and maximum life") |
+| 0x4D9580, 0x4D9650 | person state 33 (stranded): entry (timer 0, pose, "no entry" notice), per turn (grace 352/864/32 by 7 per 8 turns, then 56 life per 8 turns) |
 | 0x4D41F2 | translucent / hidden flags for ghosts and invisible people |
 | 0x4D92B0 | "hypnosis_tick": every 8 turns counts +0xAC down, then restores the person to tribe +0xAD |
 | 0x516270 | select the colour table for the next sprite draw (0x974560 = none) |
@@ -7055,7 +7890,9 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x5A7064 | 9×50-byte per-type table: byte 0 state-1's next state, bytes 3+ state-5's fidget-odds (0x5A7067) |
 | 0x4D60D0 | person state 8 (wildmen only): picks a "reference unit", may enter state 5 (fidget) or 6 ("Idle behaviour") |
 | 0x4E32A0 | "settle and go idle": next state for a person with no group - type table +5 (17; 8 for wildmen), or 41 |
-| 0x4D73E0 | person state 19: standing loop (sub-state 5), shuffle (6/7), bored pose (10) every 32 turns ("Bored poses") |
+| 0x4D73E0 | person state 19: standing loop (sub-state 5), shuffle (6/7: a ±135° turn on the spot held 4-31 turns, no step), bored pose (10) every 32 turns, worship (9) ("Bored poses") |
+| 0x4E0270 | shaman recruits worshippers: standing own-tribe people in her 3 x 3 cells go to state 19 sub-state 9, every 8 turns, `cap` per pass ("Worshipping the shaman") |
+| 0x4D6B10 | prayer cycle of a worshipper: one arm cycle, then a 4-11 turn hold from the cosmetic generator 0x89BC72 |
 | 0x4D48E0 | wildman "find a nearby tree/plant" search (radius byte 12, scenery-type flags table 0x5A79C4) - state 5 |
 | 0x4D4A00 | wildman shore-destination search (12 cells, coastal-shape table 0x5AA328, rejects land/open sea) |
 | 0x4D342A, 0x4D6E40 | wildman states 6 (walk to the shore destination) and 16 (idle/ambient animation there) ("Wildmen") |
@@ -7117,6 +7954,19 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4E0830 | `aod_vs_aod_damage`: pure health-proportional mutual damage + 800-unit knockback when the angel's locked target is itself an angel, no movement/pose code - "Angel of Death mechanics" |
 | 0x4E0A30 | `aod_release_throw`: sets the throw destination (400 units along the VICTIM's own facing), arms release, charges the angel a self-damage cost |
 | 0x4E94F0 | computes a point at a given distance/heading - used by the angel's flight physics and the vs-angel knockback |
+| 0x5D5DE8 | default keymap: 188 records of 12 bytes (key, command dword, event byte, modifier byte, flags, condition) |
+| 0x489300 | builds the keymap's per-key lists from that table (256 heads plus a held-key list) |
+| 0x489470 | keymap lookup `(key, modifiers, press/release)`, first matching binding's command |
+| 0x4A9D90 | keyboard event handler: modifier byte 0x98E91C, key-state arrays, chat / message-box / keymap routing |
+| 0x4AA1C0 | mouse-button event handler: buttons as keys 0xF0/0xF1/0xF2, then the keymap |
+| 0x4AEE40 | opens the chat line (panel 6) |
+| 0x49EB50 | chat recipient toggle click |
+| 0x47AE00 | right-click query: resolves the hovered thing or cell and shows its query |
+| 0x4ACBAD | place the held plan (`ui_cmd 0x77`, `0x78` keeps holding it) |
+| 0x4A0F00 | followers panel type/shaman icon click: Shift / Ctrl / plain into `0x450F30` |
+| 0x4A1090 | followers panel "all" icon click |
+| 0x450F30 | queues the follower-pick command (6 variants) with the camera's cell |
+| 0x451720 | best not-yet-selected follower of a type, nearest the camera, by activity group |
 
 Timing globals: turn counter 0x89D188 (u32), `turns_per_sec` 0x89D161 (u8, copied from the option at 0x98F712),
 `next_turn_time` 0x5CD92C, `step_ms` 0x5CD930 (83 in the exe image), `extra_turns` 0x895DAC (i8). Under Wine the
@@ -7230,7 +8080,7 @@ class are in `pop3-rev/docs/unit_types`.
 Other globals: the per-tribe level header `struct_56B` (0x38 bytes per tribe at 0x96070A) holds the spells:
 learned bitmask +0x00, blocked bitmask +0x10, and per spell a byte at +0x14 + spell (low nibble charges, high
 nibble gifted one-shots; `set_struct_56B_array_spell_val`); the reservoir short-delay flag is bit 3
-of 0x89C661.
+of 0x89C661, the multiplayer-game flag ("Reservoir").
 
 ### Constant table [exe]
 - At 0x5AA60F, 340 records of 31 bytes: `char name[25]`, `u8 size` (1, 2 or 4), `u8 flags`, `u32 value_ptr`.

@@ -101,7 +101,7 @@ The editor rotates buildings by quarter turns and scenery by eighths [editor].
 
   | Off | Type | Field | Files (editor range) |
   |---|---|---|---|
-  | 7 | u8 | TriggerType: 0 proximity, 1 timed, 2 player death, 3 shaman proximity, 4 library, 5 shaman + angel of death | 0 x124, 4 x23, 3 x21, 2, 5 |
+  | 7 | u8 | TriggerType: 0 proximity, 1 timed, 2 player death, 3 shaman proximity, 4 library, 5 shaman only, brings an Angel of Death | 0 x124, 4 x23, 3 x21, 2, 5 |
   | 8 | u8 | CellRadius | 1 (0, 2 rare) (0-4) |
   | 9 | u8 | RandomValue | always 0 |
   | 10 | i8 | NumOccurences | 0-5 (-1..120) |

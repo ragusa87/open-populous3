@@ -83,6 +83,11 @@ By stage (`Building::stage`, client `construction.rs`):
   building is not seen through the structure. The inner side is drawn from a copy pushed 0.006 cells along each
   face's normal (`pushed`): where the model has two faces back to back on one plane, it stays behind the textured
   one instead of flickering with it. Part-by-part assembly is still future work.
+  The original works differently [exe, measured] (pop3-rev-analysis.md "Drawing a building by stage"): no beams
+  from edges and no height cut. The building's own mesh is drawn with the faces its per-face stage byte (objects.md
+  `facs` byte 59) allows at the current stage (0-3, from wood stock / cost), some of them in plain dark wood
+  (atlas tile 250): the wooden frame is the model's own posts and beams in wood, which later stages replace with
+  their real texture and fill in with walls, then the roof once built.
 - Built: the whole model.
 - Attacked (`shaking` > 0, someone inside damaging it): the model (not the structure) rocks about its base, the
   walls move and the base stays: a blow every 0.7 s tilts it by up to 0.012 rad, a quick wobble dying out before
@@ -143,6 +148,9 @@ available, is the camp fire (see "Camp fire").
 - A left click on a valid spot places it (`Command::PlaceBuilding { player, kind, x, z, facing, braves }`): the
   blueprint stays drawn on the ground as a construction site, a `Building` with a `stage` (Blueprint / Under
   construction / Built / Dismantling) and its wood counts. A size-0 tree under it stays invisible and does not grow back while covered.
+- [exe] In the original a plain click stops holding the plan; Ctrl or Alt + click keeps it for another (walls stay
+  held anyway); a refused spot plays the error sound and keeps it; right click or Esc puts it away
+  (pop3-rev-analysis.md "Holding a building plan").
 - The braves selected when placing are assigned to it. Later, selecting braves and clicking the site assigns them
   (`Command::Assign { player, site, units }`).
 - A site needs at least one assigned brave to progress (none: it just waits); each kind has only a maximum. More
@@ -282,7 +290,8 @@ On screen (as in the game):
 - Under construction: from the moment the footprint is flat, a wooden structure of the building's shape. As pieces
   are used it turns, part after part, into the final building: more and more parts of the real model show and
   replace the wood, until the whole building stands (Built). Pieces used / wood needed picks how many parts.
-- Dismantling and damage go the other way (parts back to wood, then removed).
+- Dismantling and damage go the other way (parts back to wood, then removed). In the original a damaged built
+  building goes back to the construction drawing at the stage its remaining wood gives [exe].
 
 ### Dismantling
 Switched by the tooltip's toggle (tooltips.md, `Command::Dismantle`/`GameMap::set_dismantling`). On a built
@@ -312,6 +321,8 @@ training units (not the temple), vehicle huts and the prison (`SANDBOX_BLASTS`, 
 stands 2 s, blows up, and is built again (new ids, so each round flies its own way) once the explosion is over.
 Started by that loop, the dev hook `EXPLODE=building:N`, and for real by a building's own foundation check
 shattering it on uneven ground ("Foundation" below).
+The original's pieces do not lie on the ground [exe]: one piece per face, each deleted the turn it lands, with a
+dust puff and sound 0x13 (a splash in water) (pop3-rev-analysis.md "Flying faces (the partial explosion)").
 
 ### Damage and repair
 The level files store every building as a finished one (level-format.md, building union), but in level 10 the

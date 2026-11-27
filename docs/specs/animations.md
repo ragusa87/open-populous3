@@ -53,13 +53,13 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 8 | 6 | kneeling, raising the arms up and down (praying; worshipping the shaman nearby; used) |
 | 9 | 4 | walking, carrying wood (brave only; used) |
 | 10 | 1 | standing still, holding wood (brave only; used) |
-| 11 | 4 | cutting wood with an axe (brave only; used) |
+| 11 | 4 | cutting wood with an axe (brave only; used); also the original's hammering at a building site, and hacking at an enemy building (exe, action 6) |
 | 12 | 4 | flattening the ground: crouch, arms up, jump (brave only; maybe also wrecking a construction site in an attack); played once per flattening jump (`Pose::Jump`); frame 1 stands in for stranded units today |
 | 13 | 7 | punching: fight move 3, trading blows (exe, pop3-rev-analysis.md "Combat") |
 | 14 | 7 | receiving a punch: hit in a fight (exe) |
 | 15 | 7 (6 facing the viewer) | punching, left foot forward: fight move 2 (knocks back) and the pre-fight opening blow (exe) |
 | 16 | 1 | tilted: held 2 turns by a person struck by the pre-fight opening blow, before it is flung (exe); maybe also in a tornado |
-| 17 | 12 | spy setting fire to a building: disguised as a brave (plain) or a firewarrior (`0x20/1`), or discovered (`0x20/3`); `Pose::SetFire`, drawn with the spy's outfit whatever its disguise (TODO.md) |
+| 17 | 12 | spy setting fire to a building: the exe draws it plain (brave look) to every other tribe and with the spy's `0x20/3` to its owner, never `0x20/1` (pop3-rev-analysis.md "Spy disguise", "Look"); `Pose::SetFire`, drawn with the spy's outfit whatever its disguise (TODO.md) |
 | 18 | 6 | brave sitting down, being converted by a preacher |
 | 19 | 4 | tumbling in the air, arms spread (checked in the game; `Pose::Flung`: tumbling off the ground) |
 | 37 | 4 | falling down a slope (checked in the game; `Pose::Tumble`: tumbling on the ground) |
@@ -75,7 +75,7 @@ exist on 5, 6, 8-19, 25, 37-40, 48-52 (17 only has the firewarrior's and the spy
 | 20-24 | 4-18 | preacher giving a sermon: raises a held book (20), holds it across the chest (21), gestures with the free arm while reading (22), both arms up, book held high (23), lowers it again, open arms (24); the monk's pointed helmet drawn in [game: by eye, `HSPR0-0.DAT:6526`-`6574`, corrects an earlier "club attack" guess] |
 | 89 | 12 | scratching itself: a brave idle for too long |
 | 90 | 14 | push-ups: a firewarrior bored while idle (firewarrior gear drawn in); 91 (14) the same for a warrior (headband) [exe, pop3-rev-analysis.md "Bored poses"] |
-| 92 | 17 | spy idle: juggling |
+| 92 | 17 | spy idle: juggling (never played by the exe: no code selects it, pop3-rev-analysis.md "Bored poses") |
 | 97 | 4 | brave carbonized (struck by lightning); 98 (4) shaman carbonized (probably unused) |
 
 ### Stranded (arms up)
