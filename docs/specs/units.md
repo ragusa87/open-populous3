@@ -283,7 +283,9 @@ attack on an enemy building does (user-confirmed in play: it never hacks at the 
 contradicts pop3-rev-analysis.md's "not player-reachable", the play observation wins). The spy walks to the middle
 of the building's back wall, opposite the door, wherever it comes from (`GameMap::arson_spot`, as the original's
 one flagged wall cell, pop3-rev-analysis.md "Arson" substate 0; the original stands on it against the body, ours
-just outside the walls; the door when that is not free ground),
+just outside the walls; the door when that is not free ground; a spy that cannot get closer starts from within a
+cell of it, as a second spy on the same building stands beside the first, ours holding one person per standing
+spot `[ours]`),
 crouches facing it the whole time (the original's turn away while the firebrand flies is dropped: user-confirmed),
 aims 10 turns, winds up 24 with the firebrand, then leaves it burning on the middle of that
 wall (`EffectKind::Firebrand`, 64 turns, drawn as a small standing flame: user-confirmed in play; the original's
