@@ -124,8 +124,9 @@ impl GameMap {
                 totem.gauges[tribe.as_usize()] = 0;
                 totem.given += 1;
                 totem.since_given = 0;
+                let from = (totem.x, totem.z);
                 for gift in totem.gifts.clone() {
-                    dirty.extend(self.give(tribe, gift));
+                    dirty.extend(self.discover(tribe, gift, from));
                 }
             }
             if self.totems[k].is_exhausted() {
@@ -176,7 +177,7 @@ impl GameMap {
                     if let Some(reward) = vault.grant()
                         && let Some(owner) = self.units[i].owner.tribe()
                     {
-                        let _ = self.give(owner, reward);
+                        let _ = self.discover(owner, reward, middle);
                     }
                     self.units[i].start(Order::MoveTo { x: door.0, z: door.1 });
                 }
@@ -188,7 +189,7 @@ impl GameMap {
 
     /// `reward` goes to tribe `owner`: kept in `granted` and made available in its books or added to its mana.
     /// The ground it reshaped at once, if any.
-    fn give(&mut self, owner: TribeId, reward: Reward) -> Option<DirtyRect> {
+    pub(crate) fn give(&mut self, owner: TribeId, reward: Reward) -> Option<DirtyRect> {
         self.granted.push((owner, reward));
         let i = owner.as_usize();
         match reward {
@@ -382,11 +383,12 @@ mod tests {
         pray_at(&mut map, &eight, head);
         let done = (0..1500).find(|_| {
             map.tick();
-            !map.granted.is_empty()
+            map.totems[head].given > 0
         });
         assert!(done.is_some(), "filled");
-        assert_eq!(map.granted, vec![(TribeId::Blue, gift)]);
         assert_eq!((map.totems[head].given, map.totems[head].gauges[0]), (1, 0), "given once, its gauge starts again");
+        (0..80).for_each(|_| { map.tick(); });
+        assert_eq!(map.granted, vec![(TribeId::Blue, gift)], "landed once its cinematic arrived");
     }
 
     #[test]

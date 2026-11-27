@@ -25,6 +25,7 @@ pub mod combat;
 pub mod command;
 pub mod convert;
 pub mod coordinator;
+pub mod discovery;
 pub mod disguise;
 pub mod earthquake;
 pub mod effect;

@@ -192,7 +192,12 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   Buildings sandbox's pyramid teaches Swarm, to show it.
 - Granted to the player: a cinematic carries the reward from the vault to its panel button, a building's model in
   pieces or a spell's glyph, and the reward only counts once it arrives (pop3-rev-analysis.md "Discovery
-  cinematic: the reward flies to the panel") [exe]. Not done by us.
+  cinematic: the reward flies to the panel") [exe]. Ours (game-core `discovery.rs`): a human tribe's building or
+  spell (a vault's, or a totem's discovery gift) waits as a `Discovery`, its cinematic starting `HIDE` (6 turns
+  [exe]) after the grant and lasting `BUILDING_FLIGHT` (50 turns) or `SPELL_FLIGHT` (15) [ours: the exe counts
+  drawn frames, taken at a guessed 30 a second], then lands (`granted`, the books). A computer tribe's, and any
+  other reward, lands at once (the original waits 82 turns for everyone but the player). The same turns for every
+  peer, so lockstep holds; the client draws the cinematic from `Discovery::started`.
 
 ## Open
 - `PrayTime`'s unit for a **vault** is confirmed (pop3-rev-analysis.md "The vault"): the same 4-turn tick as a

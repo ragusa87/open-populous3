@@ -48,6 +48,8 @@ pub struct GameMap {
     pub buildings: Vec<Building>,
     /// Rewards granted so far, in order, with the tribe that got each (`worship`).
     pub granted: Vec<(TribeId, crate::building::Reward)>,
+    /// A human tribe's buildings and spells on their way to its panel (`discovery`).
+    pub discoveries: Vec<crate::discovery::Discovery>,
     /// Places to pray at: a level's scenery 9, the Worship sandbox's row.
     pub totems: Vec<Totem>,
     /// Pieces of wood lying on the ground (none in original levels).
@@ -200,7 +202,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, fog: None, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), plants: Vec::new(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), multiplayer: false, tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), discoveries: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, fog: None, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), plants: Vec::new(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), multiplayer: false, tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -230,6 +232,7 @@ impl GameMap {
                 .collect(),
             buildings: Vec::new(),
             granted: Vec::new(),
+            discoveries: Vec::new(),
             totems: Vec::new(),
             wood: Vec::new(),
             mana: per_player(ManaPool::default()),
@@ -1628,6 +1631,7 @@ impl GameMap {
         self.tend_campfires();
         if !frozen {
             self.tend_vaults();
+            self.tend_discoveries();
             dirty.extend(self.tend_totems());
             self.tend_queues();
             self.tend_training();

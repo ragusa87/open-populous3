@@ -61,7 +61,7 @@ grouping stays an approximation):
 2. firewarriors' reloads and their bolts in flight (`tend_reloads`, `tend_bolts`, combat.md "Firebolts"), Blast's
    own fireball shots in flight (`tend_fireballs`, spells.md "Blast"), then effects (`tend_effects`): before
    anything they act on, so units react the same turn;
-3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, totems, training,
+3. fires, buildings' wear (`tend_building_wear`), ashes (`Ashes::tick`), camp fires, vaults, discoveries landing (`tend_discoveries`), totems, training,
    vehicle huts (`tend_vehicle_huts`), huts' own breeding and growth (`tend_huts`, huts-and-training.md "Huts");
 4. spies meeting (`tend_spy_meetings`), spotting (`spot_enemies`), attacks followed (`tend_attacks`), buildings hacked (`tend_wrecking`) (combat.md),
    and idle wildmen sent off to eat or drink (`tend_wildmen`, pop3-rev-analysis.md "Wildmen");
