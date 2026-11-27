@@ -1054,6 +1054,9 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 - [ ] Implement the triggers and discoveries as deterministic simulation (through `Command`/state, no floats); AI scripts can fire them too (`TRIGGER_THING`).
 
 ### Computer players (AI)
+- [ ] **For a spec session**: trace the computer tribes on levels 1 and 2 - when they start training units
+  (which trainings, at what turn) and how many - and compare with ours (`game_core::ai`, the scripts'
+  training settings): something is off in play.
 - [x] A first native engine for the computer-controlled tribes (`game_core::ai`, pop3-rev-analysis.md
   "Native AI: how a computer-controlled tribe actually decides what to do"): `GameMap::tend_native_ai`
   runs, per computer tribe (one `NativeAi` per tribe `LevelHeader::ai_scripts` assigns a script to,
