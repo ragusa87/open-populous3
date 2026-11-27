@@ -18,21 +18,18 @@ numbers are guesses.
 - `heading` (an `angle::Angle`, from +x towards +z) follows the way it moves; the sinking pitch and the stranded
   roll live in their states.
 - `altitude`: the ground under a boat (the sea's surface is 0); a balloon's `float`, which follows the terrain
-  and what stands on it ("Terrain changes" [exe]): each turn it eases towards the highest of, under it and while it
-  moves at `LOOK_AHEAD` 256 to 2048 ahead, the ground plus what it
-  floats over there (`hover_over`): `HOVER` 200 over bare ground, `HOVER_OVER_BUILDING` 560 over a building (the
-  pyramid included; the exe's value), `HOVER_OVER_TREE` / `_TOTEM` 450 over a tree or a totem [guesses]. So it
-  rises before a mountain, a building or a tree and comes down after it, never bumping into them; never nearer the
-  ground under it than `CLEARANCE` 100 [ours]. Easing (`vehicle::ease`): a quarter of what is left each turn
-  (`EASE`), at most `CLIMB_STEP` 32, at least `MIN_STEP` 4, so it speeds up and slows down on a curve, never past the
-  height it heads for. The step and the distances are guesses. Drawn, its height glides between turns from where its
-  last turn started (`Vehicle::was_at`), its people with it.
-  The original, traced since (pop3-rev-analysis.md "Balloon height, look-ahead and bobbing"), differs: moving, it
-  samples only 3 points ahead, at 2, 4 and 6 × its speed (220/440/660 at its cruise 110), not under itself;
-  560 over a tree, a totem head, a fire, a reincarnation pillar or a portal as over a building (not 450), 200
-  elsewhere (plants, wood piles, rocks: 200); a linear climb of at most 22 up / 16 down a turn with no easing and
-  no `CLEARANCE` floor; and every balloon bobs every turn (a 32-turn cycle, 28 units peak to peak when parked,
-  ±4 around its target while moving). Its speed is 110, the same as a boat's (done).
+  and what stands on it, as the original (pop3-rev-analysis.md "Balloon height, look-ahead and bobbing" [exe]):
+  each turn it climbs towards the highest of the ground plus what it floats over there (`hover_over`: `HOVER` 200
+  over bare ground, plants, wood or rocks; `HOVER_OVER_TALL` 560 over a building, a tree, a totem head or a
+  reincarnation pillar), sampled at `LOOK_AHEAD` 2, 4 and 6 × its speed straight ahead while it moves (220, 440,
+  660 at cruise), never under itself then; under itself while still. The climb (`vehicle::climb`) is linear, at
+  most `CLIMB_RATE` 22 up and `SINK_RATE` 16 down a turn, landing exactly on its height, with no minimum clearance:
+  a fast approach can lag a lone tree or a cliff for a few turns. The original's fires and portals (also "tall
+  scenery") are not modelled. A balloon turned 56/2048 (10°) or more from its destination aims at a quarter of its
+  cruise (27). Drawn, its height glides between turns from where its last turn started (`Vehicle::was_at`), its
+  people with it, plus its bob (client `vehicles::bob`, drawn only, phased by its id): the original adds
+  `tri(counter & 15) × 128 / 256` a turn, negated on the second half of a 32-turn cycle, so a parked balloon swings
+  28 units peak to peak and a moving one wobbles ±4 around its height.
 
 ## Parking and drifting (done, improvised)
 - One vehicle a cell: a vehicle sent where another stands or is going stops in the nearest free cell it reaches

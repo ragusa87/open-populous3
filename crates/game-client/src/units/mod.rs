@@ -811,9 +811,10 @@ pub fn riding(map: &game_core::map::GameMap, u: &game_core::unit::Unit, at: Vec2
         let start = (height as i32 - ground).max(0) as f32 * height_scale;
         return Some((at + back_to(at, from) * (1.0 - t), start * (1.0 - t) + arc(t)));
     }
-    let v = map.vehicle(u.aboard?)?;
+    let id = u.aboard?;
+    let v = map.vehicle(id)?;
     let k = v.passengers.iter().position(|&p| p == u.id).unwrap_or(0);
-    let (seat, deck) = (at + crate::vehicles::seat_offset(v, k), crate::vehicles::deck(map, v, height_scale, alpha));
+    let (seat, deck) = (at + crate::vehicles::seat_offset(v, k), crate::vehicles::deck(map, id, v, height_scale, alpha));
     Some(match u.action {
         Action::Boarding { from, left } => {
             let t = jump_progress(left, alpha);
@@ -1072,7 +1073,7 @@ mod tests {
         map.unit_mut(id).unwrap().aboard = Some(v);
         map.vehicles.get_mut(v).unwrap().seat(id, TribeId::Blue);
         let cells = Vec2::new(60.5, 60.5);
-        let deck = crate::vehicles::deck(&map, map.vehicle(v).unwrap(), 0.01, 0.0);
+        let deck = crate::vehicles::deck(&map, v, map.vehicle(v).unwrap(), 0.01, 0.0);
         let (pos, h) = riding(&map, map.unit(id).unwrap(), cells, 0.0, 0.01).unwrap();
         assert_eq!(h, deck, "on the basket's floor");
         assert!((pos - cells).length() < 0.1, "on its seat");

@@ -79,9 +79,31 @@ pub fn cells_at(v: &Vehicle) -> Vec2 {
     Vec2::new(v.x as f32, v.z as f32) / WORLD_UNITS_PER_CELL as f32
 }
 
+/// A balloon's bob over its height at turn `counter` (its own phase added), height units (pop3-rev-analysis.md
+/// "Balloon height, look-ahead and bobbing" [exe]): each turn the original adds `tri(counter & 15) × 128 / 256`,
+/// negated on the second half of a 32-turn cycle. Parked, nothing pulls it back, so it swings 28 peak to peak (the
+/// steps added up); moving, its climb lands it back on its height each turn, so only the step shows. Drawn only:
+/// ours keeps it out of the simulation.
+pub fn bob(counter: u32, moving: bool) -> i32 {
+    let step = |c: u32| {
+        let t = (c & 15) as i32;
+        let d = t.min(16 - t) * 128 / 256;
+        if c & 16 != 0 { -d } else { d }
+    };
+    if moving { step(counter) } else { (0..=counter % 32).map(step).sum() }
+}
+
+/// What a balloon's `bob` (phased by its id) adds to its drawn height now, render units; 0 for anything else.
+pub fn bob_lift(map: &GameMap, id: VehicleId, v: &Vehicle, height_scale: f32) -> f32 {
+    match v.kind {
+        VehicleKind::Balloon if !v.is_destroyed() => bob(map.now.to_wire().wrapping_add(id.raw()), v.speed > 0) as f32 * height_scale,
+        _ => 0.0,
+    }
+}
+
 /// How high over the ground under it the hull is drawn, in render units, `alpha` into the step: a balloon's hover,
 /// glided from where its last turn started (`Vehicle::was_at`) so it climbs and sinks smoothly; a sinking boat's depth
-/// below the surface (negative).
+/// below the surface (negative). Its bob is `bob_lift`.
 pub fn lift(map: &GameMap, v: &Vehicle, height_scale: f32, alpha: f32) -> f32 {
     let ground = map.terrain.height_at(v.x as u32, v.z as u32, WORLD_UNITS_PER_CELL).max(0) as f32;
     let depth = match v.state {
@@ -103,8 +125,8 @@ const FEET: f32 = 0.03;
 const SEAT_GAP: f32 = 0.12;
 
 /// The height its people stand at over the ground under it, render units.
-pub fn deck(map: &GameMap, v: &Vehicle, height_scale: f32, alpha: f32) -> f32 {
-    lift(map, v, height_scale, alpha) + FEET
+pub fn deck(map: &GameMap, id: VehicleId, v: &Vehicle, height_scale: f32, alpha: f32) -> f32 {
+    lift(map, v, height_scale, alpha) + bob_lift(map, id, v, height_scale) + FEET
 }
 
 /// Where seat `k` is from the vehicle's middle, cells: along a boat from bow to stern, side by side in a basket.
@@ -245,7 +267,7 @@ impl WorldView for VehicleView {
         Some(VehicleView { me, hull })
     }
 
-    fn update(&self, (_, v): &(VehicleId, Vehicle), _now: SimNow, (commands, (map, params, clock, levels, objects), look, assets, grounded, transforms): &mut SystemParamItem<Self::Params>) {
+    fn update(&self, (id, v): &(VehicleId, Vehicle), _now: SimNow, (commands, (map, params, clock, levels, objects), look, assets, grounded, transforms): &mut SystemParamItem<Self::Params>) {
         if let Ok((mut g, mut drawn)) = grounded.get_mut(self.me) {
             g.at = drawn.glide(cells_at(v), map.0.now, clock.alpha());
             if drawn.owner != v.owner {
@@ -256,7 +278,7 @@ impl WorldView for VehicleView {
             }
         }
         if let Ok(mut t) = transforms.get_mut(self.hull) {
-            t.translation.y = lift(&map.0, v, params.0.height_scale, clock.alpha());
+            t.translation.y = lift(&map.0, v, params.0.height_scale, clock.alpha()) + bob_lift(&map.0, *id, v, params.0.height_scale);
             t.rotation = hull_rotation(v);
         }
     }
@@ -292,6 +314,16 @@ mod tests {
         sinking.state = State::Sinking { depth: 40, pitch: Angle::ZERO };
         assert_eq!(lift(&map, &sinking, 0.5, 0.0), -20.0);
         assert!(ground > 0);
+    }
+
+    #[test]
+    fn a_balloon_bobs_28_peak_to_peak_parked_4_either_way_moving() {
+        let parked: Vec<i32> = (0..32).map(|c| bob(c, false)).collect();
+        assert_eq!((parked.iter().min(), parked.iter().max()), (Some(&0), Some(&28)));
+        assert_eq!((bob(15, false), bob(31, false)), (28, 0), "up over the first half, back down over the second");
+        let moving: Vec<i32> = (0..32).map(|c| bob(c, true)).collect();
+        assert_eq!((moving.iter().min(), moving.iter().max()), (Some(&-4), Some(&4)));
+        assert_eq!(&moving[..9], [0, 0, 1, 1, 2, 2, 3, 3, 4]);
     }
 
     #[test]
