@@ -262,8 +262,10 @@ impl UnitSprites {
         let tribe = unit.shown_owner(now.tick).tribe().map_or(0, TribeId::as_usize);
         let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(art::shown_dir(&unit.action, facing, yaw))?;
         let bored = matches!(pose, Pose::Scratch | Pose::Pushup).then(|| art::bored(shown, unit.id, now.tick)).flatten();
+        let kneeling = worship.and_then(|_| worship::kneeling_for(unit, now.tick));
         let frame = match bored {
             Some(b) => b.frame(shown).min(frames.len().saturating_sub(1)),
+            None if let Some(turns) = kneeling => worship::prayer_frame(frames.len(), turns, unit.id.raw()),
             None if pose == Pose::Pedal && still => 0,
             None => frame_index(pose, frames.len(), &unit.action, now, clock.alpha()),
         };
@@ -874,13 +876,12 @@ fn animate_views(
         ground.at = perched(&map.0, &heights, u).or_else(|| riding(&map.0, u, at, clock.alpha(), params.0.height_scale)).map_or(at, |p| p.0);
         t.rotation = facing_camera;
     }
-    let shamans = worship::shamans(units);
     for (body, mut height, mut mesh, mut mat, mut vis) in &mut bodies {
         let hidden = units.get(body.0).is_some_and(|u| hidden_inside(&map.0, u));
         vis.set_if_neq(if hidden { Visibility::Hidden } else { Visibility::Inherited });
         let unit = units.get(body.0);
         let frame = unit.and_then(|u| {
-            let worship = worship::worship_facing(u, u.owner.tribe().and_then(|t| shamans.get(t.as_usize())).copied().flatten());
+            let worship = worship::worship_facing(u);
             let still = !u.aboard.and_then(|v| map.0.vehicle(v)).is_some_and(crate::vehicles::under_way);
             sprites.frame_for(u, worship, still, rig.yaw, &clock, *now, map.0.on_winning_side(u.owner))
         });

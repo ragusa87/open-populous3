@@ -1657,6 +1657,7 @@ impl GameMap {
         self.tend_vehicles();
         self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id.raw()));
         self.revert_expired_hypnosis();
+        self.tend_kneeling();
         self.tend_stranded();
         if crate::unit::HEAL_EVERY.fires(now, 0) {
             self.units.iter_mut().for_each(Unit::heal);

@@ -64,8 +64,8 @@ list per kind, in this order:
 5. coordinators (docs/specs/coordinators.md): scans that start them (challenges, melees joined), their turns, the
    finished ones removed, their events, then the units whose coordinator is gone released, so a coordinator ending
    now is gone when its units tick;
-6. vehicles (`tend_vehicles`, docs/specs/vehicles.md: their passengers carried along), healing on its rhythm
-   (`HEAL_EVERY`), units (`Unit::tick`), then their events (wood, work, doors) in unit order;
+6. vehicles (`tend_vehicles`, docs/specs/vehicles.md: their passengers carried along), followers kneeling to their
+   shaman (`tend_kneeling`), stranded units' checks (`tend_stranded`), healing on its rhythm (`HEAL_EVERY`), units (`Unit::tick`), then their events (wood, work, doors) in unit order;
 7. chained orders, building work, wood put down, people counted inside, mana (`ManaPool::tick`, each player's with
    its spell book), the land the human tribes uncovered (`tend_fog`, fog-of-war.md), the gone units removed.
 

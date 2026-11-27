@@ -1,99 +1,61 @@
-//! Idle followers near their shaman pray facing her. Drawn only: in the simulation they stay idle
-//! and take orders as usual (docs/specs/units.md, "Worshipping the shaman").
+//! Followers kneeling to their shaman (`game_core::kneel`, docs/specs/units.md "Worshipping the shaman"): drawn in
+//! the prayer pose, its arms going up and down once, then held still 4-11 turns, again.
 
-use game_core::unit::{octant, torus_delta, Action, Unit, UnitKind};
-use pop3_format::catalog::TRIBES;
-use pop3_format::WORLD_UNITS_PER_CELL;
+use game_core::map::Lcg;
+use game_core::time::Tick;
+use game_core::unit::Unit;
 
-/// How close (world units, on each axis) the shaman must be.
-pub const WORSHIP_RANGE: i32 = 3 * WORLD_UNITS_PER_CELL as i32;
+/// Turns each prayer frame shows (the Pray pose's 4 frames a second, 12 turns a second).
+const TURNS_PER_FRAME: u32 = 3;
+/// The still hold between two arm cycles: 4-11 turns ("Worshipping the shaman"; the original draws it from a
+/// second, cosmetic generator).
+const HOLD_MIN: u32 = 4;
+const HOLD_SPAN: u32 = 8;
 
-/// Each tribe's shaman, by owner.
-pub fn shamans(units: &[Unit]) -> [Option<&Unit>; TRIBES as usize] {
-    let mut out = [None; TRIBES as usize];
-    for u in units.iter().filter(|u| u.kind == UnitKind::Shaman) {
-        if let Some(slot) = u.owner.tribe().and_then(|t| out.get_mut(t.as_usize())) {
-            *slot = Some(u);
-        }
-    }
-    out
+/// The facing to draw `unit` praying in, while it kneels to its shaman.
+pub fn worship_facing(unit: &Unit) -> Option<u8> {
+    unit.kneeling().map(|_| unit.facing)
 }
 
-/// The facing (eighths of a turn) towards `shaman` when `unit` worships her: an idle follower
-/// of her tribe (not a wildman) on foot, with her idle or walking within range, on foot too (aboard a vehicle, they
-/// pedal instead).
-pub fn worship_facing(unit: &Unit, shaman: Option<&Unit>) -> Option<u8> {
-    let shaman = shaman?;
-    let worshipper = UnitKind::FOLLOWERS.contains(&unit.kind);
-    let present = matches!(shaman.action, Action::Idle | Action::Walking { .. });
-    let on_foot = unit.aboard.is_none() && shaman.aboard.is_none();
-    if !worshipper || !on_foot || unit.action != Action::Idle || !present || unit.owner != shaman.owner {
-        return None;
+/// The prayer frame (of `frames`) `turns` after a unit of `id` knelt: each arm cycle, then a hold on the first
+/// frame whose length is seeded by `id` and the cycle.
+pub fn prayer_frame(frames: usize, turns: u32, id: u32) -> usize {
+    if frames == 0 {
+        return 0;
     }
-    let (dx, dz) = (torus_delta(unit.x, shaman.x), torus_delta(unit.z, shaman.z));
-    (dx.abs() <= WORSHIP_RANGE && dz.abs() <= WORSHIP_RANGE).then(|| octant(dx, dz))
+    let cycle = frames as u32 * TURNS_PER_FRAME;
+    let (mut left, mut n) = (turns, 0u32);
+    loop {
+        if left < cycle {
+            return (left / TURNS_PER_FRAME) as usize;
+        }
+        left -= cycle;
+        let hold = HOLD_MIN + Lcg(id.wrapping_mul(2_654_435_761) ^ n.wrapping_mul(0x9E37_79B9)).next_u32() % HOLD_SPAN;
+        if left < hold {
+            return 0;
+        }
+        left -= hold;
+        n += 1;
+    }
+}
+
+/// Turns since `unit` knelt at `now`, if it kneels.
+pub fn kneeling_for(unit: &Unit, now: Tick) -> Option<u32> {
+    unit.kneeling().map(|k| now.since(k.since).max(0) as u32)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use game_core::tribes::TribeId;
-
-    const CELL: u16 = WORLD_UNITS_PER_CELL as u16;
-
-    fn unit(owner: TribeId, kind: UnitKind, cell: (u16, u16)) -> Unit {
-        Unit::new(game_core::id::Id::from_raw(1), owner, kind, (cell.0 * CELL + CELL / 2, cell.1 * CELL + CELL / 2))
-    }
 
     #[test]
-    fn idle_tribesmen_turn_to_their_shaman() {
-        let her = unit(TribeId::Blue, UnitKind::Shaman, (10, 10));
-        assert_eq!(worship_facing(&unit(TribeId::Blue, UnitKind::Brave, (8, 10)), Some(&her)), Some(2), "she is towards +x");
-        assert_eq!(worship_facing(&unit(TribeId::Blue, UnitKind::Warrior, (10, 13)), Some(&her)), Some(4), "towards -z, 3 cells");
-        assert_eq!(worship_facing(&unit(TribeId::Blue, UnitKind::Spy, (12, 12)), Some(&her)), Some(5));
-        assert_eq!(worship_facing(&unit(TribeId::Blue, UnitKind::Firewarrior, (10, 9)), Some(&her)), Some(0));
-    }
-
-    #[test]
-    fn range_wraps_around_the_torus() {
-        let last = (65536 / WORLD_UNITS_PER_CELL - 1) as u16;
-        let her = unit(TribeId::Blue, UnitKind::Shaman, (0, 5));
-        assert_eq!(worship_facing(&unit(TribeId::Blue, UnitKind::Brave, (last, 5)), Some(&her)), Some(2));
-        assert_eq!(worship_facing(&unit(TribeId::Blue, UnitKind::Brave, (14, 5)), Some(&her)), None, "out of range");
-    }
-
-    #[test]
-    fn only_idle_tribesmen_of_her_tribe_with_her_idle_or_walking() {
-        let mut her = unit(TribeId::Blue, UnitKind::Shaman, (10, 10));
-        let brave = unit(TribeId::Blue, UnitKind::Brave, (9, 10));
-        assert_eq!(worship_facing(&unit(TribeId::Red, UnitKind::Brave, (9, 10)), Some(&her)), None, "other tribe");
-        assert!(worship_facing(&unit(TribeId::Blue, UnitKind::Preacher, (9, 10)), Some(&her)).is_some(), "preachers too");
-        for kind in [UnitKind::Wildman, UnitKind::Shaman] {
-            assert_eq!(worship_facing(&unit(TribeId::Blue, kind, (9, 10)), Some(&her)), None, "{kind:?}");
-        }
-        let mut busy = brave.clone();
-        busy.action = Action::Walking { to: (0, 0) };
-        assert_eq!(worship_facing(&busy, Some(&her)), None, "not idle");
-        her.action = Action::Walking { to: (0, 0) };
-        assert!(worship_facing(&brave, Some(&her)).is_some(), "she walks past");
-        for action in [Action::Worshipping { at: game_core::unit::WorshipAt::Vault { corner: (0, 0) } }, Action::Casting { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, Action::Dead { left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }] {
-            her.action = action;
-            assert_eq!(worship_facing(&brave, Some(&her)), None, "{action:?}");
-        }
-        assert_eq!(worship_facing(&brave, None), None, "no shaman");
-        her.action = Action::Idle;
-        let boat = Some(game_core::id::Id::from_raw(9));
-        let mut aboard = brave.clone();
-        aboard.aboard = boat;
-        assert_eq!(worship_facing(&aboard, Some(&her)), None, "aboard a vehicle: pedalling");
-        her.aboard = boat;
-        assert_eq!(worship_facing(&brave, Some(&her)), None, "she is aboard one");
-    }
-
-    #[test]
-    fn shamans_by_tribe() {
-        let units = [unit(TribeId::Yellow, UnitKind::Shaman, (1, 1)), unit(TribeId::Blue, UnitKind::Brave, (2, 2)), unit(TribeId::Blue, UnitKind::Shaman, (3, 3))];
-        let s = shamans(&units);
-        assert_eq!((s[0].map(|u| u.x), s[1].is_none(), s[2].map(|u| u.x)), (Some(units[2].x), true, Some(units[0].x)));
+    fn one_arm_cycle_then_a_still_hold_of_4_to_11_turns() {
+        let frames = 4;
+        let cycle: Vec<usize> = (0..12).map(|t| prayer_frame(frames, t, 7)).collect();
+        assert_eq!(cycle, [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]);
+        let held = (12..40).take_while(|&t| prayer_frame(frames, t, 7) == 0).count() as u32 - TURNS_PER_FRAME;
+        assert!((HOLD_MIN..HOLD_MIN + HOLD_SPAN).contains(&held), "held {held} turns, then the next cycle's first frame");
+        assert_eq!(prayer_frame(frames, 12 + held + 3, 7), 1, "the next cycle");
+        assert_eq!(prayer_frame(0, 5, 7), 0);
     }
 }

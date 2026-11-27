@@ -633,6 +633,8 @@ pub struct Unit {
     stranded_for: u16,
     /// The turns left of a shuffle's hold (`crate::idle`): it has turned on the spot and stands still.
     shuffle: Option<Countdown>,
+    /// Kneeling to its shaman while it stands idle (`crate::kneel`).
+    kneel: Option<crate::kneel::Kneel>,
     /// The building (id) this brave is assigned to, `Order::Build`.
     pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
@@ -710,6 +712,7 @@ impl Unit {
             stuck_watch: None,
             still_ticks: 0,
             stranded_for: 0,
+            kneel: None,
             shuffle: None,
             work: None,
             inside: None,
@@ -729,6 +732,19 @@ impl Unit {
         self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some() || self.to_vehicle.is_some()
     }
 
+    /// Kneeling to its shaman (`crate::kneel`): only while it stands idle.
+    pub fn kneeling(&self) -> Option<crate::kneel::Kneel> {
+        self.kneel.filter(|_| self.action == Action::Idle)
+    }
+
+    pub(crate) fn kneel(&mut self, kneel: crate::kneel::Kneel) {
+        (self.kneel, self.shuffle) = (Some(kneel), None);
+    }
+
+    pub(crate) fn stand_up(&mut self) {
+        self.kneel = None;
+    }
+
     /// Holding still after a shuffle's turn (`crate::idle`).
     pub fn shuffling(&self) -> bool {
         self.shuffle.is_some()
@@ -740,6 +756,9 @@ impl Unit {
         let follower = !matches!(self.kind, UnitKind::Wildman | UnitKind::AngelOfDeath);
         if !(follower && self.truly_idle() && self.in_the_open() && !self.motion.airborne() && self.is_alive()) {
             self.shuffle = None;
+            return;
+        }
+        if self.kneel.is_some() {
             return;
         }
         if let Some(mut left) = self.shuffle {
@@ -1085,6 +1104,9 @@ impl Unit {
         self.idle_ticks = if self.truly_idle() { self.idle_ticks.saturating_add(1) } else { 0 };
         if !matches!(self.action, Action::Stranded { .. }) {
             self.stranded_for = 0;
+        }
+        if self.action != Action::Idle {
+            self.kneel = None;
         }
         if self.action != Action::Idle {
             self.shuffle = None;

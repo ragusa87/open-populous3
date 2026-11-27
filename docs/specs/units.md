@@ -337,13 +337,17 @@ A unit is inside a building when it walked in by the door (`Unit::enter`) or sto
 up. Inside, it is not drawn while it stands there; any walk first takes it straight to the door, then on its
 route (units.md "Pathfinding", buildings.md "Walking around buildings"). A teleport takes it out.
 
-## Worshipping the shaman (decoration, done: `units/worship.rs`)
-Idle followers (braves, warriors, firewarriors, spies, preachers) whose shaman (same tribe) is within 3 cells on each axis (torus)
-and idle or walking pray facing her: the Pray pose (original anim 8, kneeling, arms going up and down; the CC0
-pray sheet), turned towards her (`octant`), following her as she walks by. Drawn only: in the simulation they stay
-Idle, selectable and orderable, nothing goes through `Command`. Wildmen and the shaman never do it; casting, praying, drowning or dying, she gets no worship. Nobody aboard a vehicle worships (they pedal), and nobody worships her while she is aboard one.
-The original differs (pop3-rev-analysis.md "Worshipping the shaman", TODO.md): her 3 x 3 cells, whatever she does,
-one new worshipper per 8 turns, kept within 4.6 cells.
+## Worshipping the shaman (done: `game_core::kneel`, client `units/worship.rs`)
+As the original (pop3-rev-analysis.md "Worshipping the shaman", person state 19 sub-state 9 [exe]): a sub-state of
+standing idle (`Unit::kneeling`), so the follower stays `Action::Idle`, selectable and orderable, and any order
+ends it; no shuffle or bored pose meanwhile. Every 8 turns at her own phase (`kneel::RECRUIT`), whatever she is
+doing, a living shaman (not a ghost) recruits one follower of her tribe standing idle on the ground in the 3 × 3
+cells around her own (`kneel::recruitable`: any follower kind, a ghost too, not aboard a vehicle); standing idle at
+her reincarnation site, everyone there at once (the original's cap of 200). Recruited, it turns to face her, again
+every 4 turns at its own phase, and every 32 turns stays only while a shaman of its tribe is within 2360 units (4.6
+cells) on both axes, else stands up. Drawn in the Pray pose (original anim 8, kneeling; the CC0 pray sheet) facing
+where it faces: one arm cycle, then a still hold of 4-11 turns seeded by its id, again (`worship::prayer_frame`;
+the original draws the hold from a second, cosmetic generator). Wildmen and the shaman never kneel.
 
 ## Standing slots (done: `game_core::slots`)
 - Each cell holds 3 x 3 standing spots (`PER_CELL`, about a third of a cell apart: a unit's width).
