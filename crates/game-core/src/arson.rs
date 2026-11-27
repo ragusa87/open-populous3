@@ -7,7 +7,7 @@
 use crate::building::BuildingId;
 use crate::effect::{Effect, EffectKind};
 use crate::event::WorldEvent;
-use crate::map::{GameMap, torus_dist2};
+use crate::map::GameMap;
 use crate::time::{Countdown, Ticks};
 use crate::tribes::Owner;
 use crate::unit::{Action, Order, UnitKind, torus_delta};
@@ -22,9 +22,6 @@ pub const FLIGHT_TICKS: Ticks = Ticks::new(8);
 pub const WITHDRAW_TICKS: Ticks = Ticks::new(24);
 /// The firebrand left burning on the wall, a cosmetic effect [exe]: 64 turns.
 pub const FIREBRAND_TICKS: Ticks = Ticks::new(64);
-/// Percent chance the owners notice once it burns and the spy is revealed: the original reads a per-tribe table
-/// whose numbers were never read. `[guess]`.
-pub const NOTICED_PERCENT: u32 = 25;
 /// Close enough to its spot to start aiming, world units: the original's 12 on both axes [exe].
 const ARRIVED: i32 = 12;
 
@@ -51,26 +48,15 @@ impl GameMap {
         }
     }
 
-    /// Where a spy stands to set `building` on fire from `from`: against the middle of one of its walls, never the
-    /// door's (user-confirmed in play: the original stands on a flagged wall cell of the footprint), the one
-    /// nearest to it; just outside the walls, since ours cannot be stood on. Its door when no wall side is free.
-    pub fn arson_spot(&self, building: BuildingId, from: (u16, u16)) -> Option<(u16, u16)> {
+    /// Where a spy stands to set `building` on fire, wherever it comes from: against the middle of its back wall,
+    /// opposite the door (the original's one flagged wall cell, pop3-rev-analysis.md "Arson" substate 0); just
+    /// outside the walls, since ours cannot be stood on. Its door when that is not free ground.
+    pub fn arson_spot(&self, building: BuildingId) -> Option<(u16, u16)> {
         let b = self.building(building)?;
         let f = b.kind.footprint();
         let (ox, oz) = f.offset;
-        let (hx, hz) = f.half;
-        let out = |(dx, dz): (i32, i32)| {
-            [crate::building::DOOR_GAP, 512, 768].into_iter().map(move |gap| (ox + dx * (hx + gap), oz + dz * (hz + gap)))
-        };
-        let sides = [(1, 0), (-1, 0), (0, 1)];
-        let spot = sides
-            .into_iter()
-            .filter_map(|side| {
-                let (dx, dz) = side;
-                out(side).map(|(x, z)| b.local_point((if dx == 0 { ox } else { x }, if dz == 0 { oz } else { z }))).find(|&p| self.free_ground(p))
-            })
-            .min_by_key(|&p| (torus_dist2(from, p), p));
-        Some(spot.unwrap_or(b.door()))
+        let back = [crate::building::DOOR_GAP, 512, 768].into_iter().map(|gap| b.local_point((ox, oz + f.half.1 + gap))).find(|&p| self.free_ground(p));
+        Some(back.unwrap_or(b.door()))
     }
 
     /// Ground a spy can stand on: not behind any building's walls, not the sea.
@@ -102,7 +88,7 @@ impl GameMap {
                         self.units[i].arson = None;
                         continue;
                     }
-                    let Some(spot) = self.arson_spot(building, (u.x, u.z)) else { continue };
+                    let Some(spot) = self.arson_spot(building) else { continue };
                     if torus_delta(u.x, spot.0).abs() <= ARRIVED && torus_delta(u.z, spot.1).abs() <= ARRIVED {
                         let centre = self.building(building).map(|b| b.centre()).unwrap_or(spot);
                         self.units[i].face(centre);
@@ -150,7 +136,7 @@ impl GameMap {
             }
             Stage::Flight => {
                 events.push(WorldEvent::SetFire { building, by: owner });
-                if self.rng.next_u32() % 100 < NOTICED_PERCENT {
+                if self.noticed(owner, building) {
                     self.units[i].reveal();
                 }
                 Some((Stage::Withdraw, WITHDRAW_TICKS))
@@ -162,6 +148,18 @@ impl GameMap {
             None => self.end_arson(i),
         }
         events
+    }
+
+    /// Whether the owners of `building` notice a spy of tribe `spy` setting it on fire ("Arson" substate 4 [exe]):
+    /// rolled only for a human player's spy, outside multiplayer games, against the owner's `SPY_DISCOVER_CHANCE`
+    /// (0 for a tribe without a computer player: never).
+    fn noticed(&mut self, spy: Owner, building: BuildingId) -> bool {
+        let Some(owner) = self.building(building).and_then(|b| b.owner.tribe()) else { return false };
+        if self.multiplayer || spy.tribe().is_none_or(|t| self.tribes.is_computer(t)) {
+            return false;
+        }
+        let chance = self.ai_attr(owner, crate::ai_spy::SPY_DISCOVER_CHANCE);
+        (self.rng.next_u32() % 100) < chance.max(0) as u32
     }
 
     /// Whether a genuine member of the tribe spy `i` is disguised as stands at the `door` ("a real one at the door"
@@ -223,21 +221,39 @@ mod tests {
     }
 
     #[test]
-    fn its_spot_is_the_middle_of_the_nearest_wall_never_the_doors() {
+    fn its_spot_is_the_middle_of_the_back_wall_opposite_the_door() {
         let (map, hut, _) = scene(UnitKind::Spy);
         let b = map.building(hut).unwrap();
         let (cx, cz) = b.centre();
         let local = |p: (u16, u16)| crate::terrain::to_local((torus_delta(cx, p.0), torus_delta(cz, p.1)), b.facing / 2);
         let f = b.kind.footprint();
-        for from in [b.local_point((3000, 0)), b.local_point((-3000, 0)), b.local_point((0, 3000)), b.local_point((0, -3000)), b.door()] {
-            let spot = map.arson_spot(hut, from).unwrap();
-            let (x, z) = local(spot);
-            assert!(!map.behind_walls(spot) && b.covers(spot, 1024), "free ground just outside it: {spot:?}");
-            assert!(x == f.offset.0 || z == f.offset.1, "the middle of a wall: {x}, {z}");
-            assert!(z >= f.offset.1, "never the door's side: {x}, {z}");
-        }
-        let (x, _) = local(map.arson_spot(hut, b.local_point((3000, 0))).unwrap());
-        assert!(x > 0, "the wall facing it");
+        let spot = map.arson_spot(hut).unwrap();
+        let (x, z) = local(spot);
+        assert!(!map.behind_walls(spot) && b.covers(spot, 1024), "free ground just outside it: {spot:?}");
+        assert!(x == f.offset.0 && z > f.offset.1 + f.half.1, "the middle of the back wall: {x}, {z}");
+        let (_, door_z) = local(b.door());
+        assert!(door_z < f.offset.1, "the door is the other side");
+    }
+
+    #[test]
+    fn a_human_player_s_spy_is_noticed_at_the_owner_s_own_chance_a_computer_s_never() {
+        let run = |chance: Option<i32>, computer_spy: bool| {
+            let (mut map, hut, spy) = scene(UnitKind::Spy);
+            if let Some(c) = chance {
+                map.ai.push(crate::ai::NativeAi::new(TribeId::Red));
+                map.ai_set_attr(TribeId::Red, crate::ai_spy::SPY_DISCOVER_CHANCE, c);
+            }
+            if computer_spy {
+                map.tribes = map.tribes.clone().with_ai_scripts([1, 0, 0, 0]);
+            }
+            map.unit_mut(spy).unwrap().disguise_as(TribeId::Green, Ticks::ZERO);
+            until(&mut map, 600, |m| m.building(hut).unwrap().burning.is_some()).expect("lit");
+            map.tick();
+            map.unit(spy).unwrap().disguised()
+        };
+        assert!(!run(Some(100), false), "noticed for sure");
+        assert!(run(Some(0), false) && run(None, false), "never: no chance, or a human owner");
+        assert!(run(Some(100), true), "a computer's spy is never rolled for");
     }
 
     #[test]
