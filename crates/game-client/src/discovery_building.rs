@@ -220,7 +220,7 @@ pub fn even_sizes(tris: usize) -> Vec<usize> {
 }
 
 /// The cinematic's camera: orthographic, one unit a logical pixel, drawn over the game and its panel, under the
-/// menus and the cursor.
+/// menus and the cursor; off while no building flies.
 #[derive(Component)]
 pub struct DiscoveryCamera;
 
@@ -228,7 +228,7 @@ pub fn spawn_camera(commands: &mut Commands) {
     commands.spawn((
         DiscoveryCamera,
         Camera3d::default(),
-        Camera { order: 1, clear_color: ClearColorConfig::None, ..default() },
+        Camera { order: 1, clear_color: ClearColorConfig::None, is_active: false, ..default() },
         Projection::Orthographic(OrthographicProjection { scaling_mode: ScalingMode::WindowSize, near: -4000.0, far: 4000.0, ..OrthographicProjection::default_3d() }),
         Transform::default(),
         RenderLayers::layer(DISCOVERY_LAYER),
@@ -251,7 +251,7 @@ pub struct DiscoveryBuildingPlugin;
 
 impl Plugin for DiscoveryBuildingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (start_and_end, fly).chain().after(crate::units::SimStep));
+        app.add_systems(Update, (start_and_end, fly, wake_camera).chain().after(crate::units::SimStep));
     }
 }
 
@@ -319,6 +319,16 @@ fn start_and_end(
             (e, piece, release(rank, n))
         }).collect();
         commands.spawn(BuildingFlight { granted: d.granted, reward: d.reward, start, unit, pieces: entities, cued: 0 });
+    }
+}
+
+/// The camera draws only while a building flies (an idle one still costs its passes and slows the first frames).
+fn wake_camera(flights: Query<(), With<BuildingFlight>>, mut camera: Query<&mut Camera, With<DiscoveryCamera>>) {
+    let active = !flights.is_empty();
+    for mut c in &mut camera {
+        if c.is_active != active {
+            c.is_active = active;
+        }
     }
 }
 
