@@ -600,8 +600,9 @@ fn spawn_tooltip(mut commands: Commands) {
     ));
 }
 
-/// The tooltip of the building or tree under the cursor once rested on for `HOVER_SECS`, right-clicked or
-/// left-clicked with nothing selected (which also reveals who is in another tribe's building),
+/// The tooltip of the building or tree under the cursor once rested on for `HOVER_SECS`, or at once on a right or
+/// left click with nothing selected: the original's right-click query (with a selection, a right click only
+/// deselects, `selection`); a click also reveals who is in another tribe's building,
 /// above it, kept while the cursor is on it or on the tooltip (`sticky`). Its content is kept up to date as its
 /// model changes: a bars-only change updates them in place (`set_bars`); a same-shape change (a different
 /// occupant, a wood pile filling, a selection) redraws the existing lines/icons/arrows in place
@@ -648,7 +649,8 @@ fn show_tooltip(
     if target != state.hovered_since.0 {
         state.hovered_since = (target, now, false);
     }
-    let clicked = target.is_some() && (mouse.just_pressed(MouseButton::Right) || (mouse.just_pressed(MouseButton::Left) && selection.units.is_empty()));
+    let nothing_selected = selection.units.is_empty() && !selection.is_changed();
+    let clicked = target.is_some() && nothing_selected && mouse.any_just_pressed([MouseButton::Right, MouseButton::Left]);
     state.hovered_since.2 |= clicked;
     let over = state.shown.is_some() && *interaction != Interaction::None;
     let holding = over || (target.is_some() && target == state.shown);

@@ -310,14 +310,14 @@ pub(super) fn select_and_order(
     let on_map = cursor.filter(|c| c.x > PANEL_WIDTH && !over_ui && spell.0.is_none() && !blueprint.is_active());
     let crate::keymap::Mods { ctrl: add, shift, alt } = shortcuts.mods();
     let mut moves = Vec::new();
-    // Shift + right click removes what is under the cursor (a camp fire) and keeps the selection; a
-    // right click on a tree shows its wood (`nature`) and keeps it too.
+    // Shift + right click removes what is under the cursor (a camp fire) and keeps the selection; a plain right
+    // click deselects, and with nothing selected queries what is under the cursor instead (`tooltip`).
     if let (true, Some(c)) = (mouse.just_pressed(MouseButton::Right), on_map) {
         let ray = cams.iter().next().and_then(|cam| cam.0.viewport_to_world(cam.1, c).ok());
         let ground = ray.and_then(|r| pick_ground(&map.0.terrain, rig.focus, &params.0, r.origin, *r.direction));
         match ground.and_then(|cell| shift_right_click(&map.0, world_units(cell), shift)) {
             Some(command) => moves.push(command),
-            None if tree.tree.is_none() => {
+            None if !selection.units.is_empty() => {
                 selection.clear();
                 patrol_session.0 = None;
             }

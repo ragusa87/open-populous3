@@ -58,8 +58,8 @@ the model visibly snapping to a smaller size every 100 units rather than scaling
 - Otherwise: the CC0 Quaternius Stylized Nature MegaKit (`assets/3d/nature`, type modulo 10: 0-4 common
   trees, 5-9 pines), 1.6 cells tall at full size. Models load through Bevy's asset server from the repository's
   `assets/` (`dev::asset_plugin`).
-Resting the cursor on a visible tree for 1.5 s (`HOVER_SECS`), or right-clicking it, shows its tooltip above
-it (tooltips.md): its name and a wood row of its current wood, one log per piece (`GameMap::wood_slots`), until the cursor leaves the tree (`HoveredTree`). A right
-click on a tree keeps the unit selection (elsewhere it clears it). The tree under the cursor is the one whose screen box (trunk base to top,
+Resting the cursor on a visible tree for 1.5 s (`HOVER_SECS`), or right-clicking it with nothing selected, shows its tooltip above
+it (tooltips.md): its name and a wood row of its current wood, one log per piece (`GameMap::wood_slots`), until the cursor leaves the tree (`HoveredTree`). With a
+selection, a right click on a tree deselects, as anywhere. The tree under the cursor is the one whose screen box (trunk base to top,
 30% of its height either side) holds it, the nearest one when several overlap (`tree_at`). Not over the panel
 (it is hovered while a spell is aimed, but shows no tooltip then). The original capacity of a tree is not known, so the row has no empty places.

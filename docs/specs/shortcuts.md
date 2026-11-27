@@ -60,7 +60,7 @@ A binding needs exactly its modifiers (Ctrl+Left is not Left), Alt ignored; a ch
 | Alt + 1-6 | camera to group | - |
 | Shift+Backspace | select the previous group | - |
 | Insert / Home / PgUp | buildings / spells / followers panel | - / camera tilt / zoom (Ctrl) and next level |
-| Right click on anything | query it (stays open while held, until the cursor leaves the thing) | deselects (hover shows tooltips, tooltips.md) |
+| Right click on anything | query it (stays open while held, until the cursor leaves the thing) | with a selection: deselects; with none: its query, the tooltip at once (tooltips.md) |
 
 ## Followers
 | Input | Original | Ours |
