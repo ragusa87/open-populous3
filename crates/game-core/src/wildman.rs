@@ -301,8 +301,10 @@ mod tests {
     #[test]
     fn is_shore_cell_wants_dry_walkable_ground_next_to_the_sea() {
         let mut map = map_with(64);
-        for &(x, z) in &[(31, 30), (32, 30), (31, 31), (32, 31)] {
-            map.terrain.set(x, z, 0);
+        for z in 29..=32 {
+            for x in 30..=33 {
+                map.terrain.set(x, z, 0);
+            }
         }
         assert!(!map.is_shore_cell((31, 30)), "wet itself: not shore, that's open sea");
         assert!(map.is_shore_cell((30, 30)), "dry, right next to that sea cell");

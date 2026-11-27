@@ -401,12 +401,12 @@ a grid-vertex-aligned, repeat-wrapped texture reproduces the old hand-written co
   channel is 1 at a walkable cell's own texel, 0 at sea, bilinearly sampled; ground where it reaches 0.2
   (`COAST_THRESHOLD` in `ground.wgsl`). Covers a lone walkable cell's corner (0.25 there), puts straight coasts
   0.3 cell past the walkable edge and rounds the corners. Ground there, even at height 0, takes the lowest land
-  row. `walkable_cells`'s own render-only sea test (`terrain_texture::looks_like_sea`) has since diverged slightly
-  from `game_core::unit::is_sea` itself - see TODO.md "Terrain" ("Sea level"): a cell at a very low but nonzero
-  height now also reads as "sea" for this one purpose (height <= `VISUAL_SEA_HEIGHT`, a guess; the original has no
-  such threshold: a point is sea when it and its 8 neighbours are at 0, pop3-rev-analysis.md "Sea, shore and land"), so it renders as
-  water instead of through `land_colour`'s own `cliff` remap, while staying exactly as walkable as before for
-  everything gameplay (pathing, drowning, building placement all still read `is_sea` directly, untouched).
+  row. `walkable_cells`'s sea test (`terrain_texture::looks_like_sea`) is the simulation's own
+  `game_core::unit::is_sea`: as the original, a height point is sea only when it and its 8 neighbours are at sea
+  level (`Heightmap::is_water`, pop3-rev-analysis.md "Sea, shore and land"), with no height threshold, so what is
+  drawn as water is what drowns people and floats boats, and the coast sits one point further out to sea than the
+  last height-0 point. A cell's dirty-rect refresh (`rewalkable_cells`) reaches two cells before and one past an
+  edited point for it.
   **Fixed 2026-10-23**: `fragment`'s branch on `COAST_THRESHOLD` used to snap instantly between `water_colour`
   and `land_colour` with no blend at all. `fragment` now blends `land_colour`/`water_colour` over a band of `walk`
   values around `COAST_THRESHOLD` (`COAST_BLEND_WIDTH`, `ground.wgsl`), its own centre perturbed by the same `disp`

@@ -32,20 +32,11 @@ pub const PX_PER_CELL: usize = 8;
 /// than this even at a patch's own darkest (`ash_coverage`).
 pub const ASH_COVER: f32 = 0.75;
 
-/// Render-only "looks like sea" threshold (TODO.md "Terrain": "the original draws very low ground... like
-/// water; find the original's threshold" - not confirmed, a guess tagged as such). `game_core::unit::is_sea`
-/// itself, and everything gameplay reads off it (pathing, drowning, building placement), still requires exactly
-/// `SEA_LEVEL` (0) - this only widens what the GROUND SHADER treats as "sea" for its land/water branch choice, so
-/// a near-zero-but-nonzero cell (reported: rendering through `land_colour`'s own `cliff` remap instead, reading
-/// as lava/rock right where plain shallow water was expected - a coastal cell's own steep drop to the seabed
-/// legitimately pushes `blend` high there, terrain-textures.md "cliff") gets the calmer, theme-tinted
-/// `water_colour` instead. Purely cosmetic: the cell stays exactly as walkable/buildable as before.
-const VISUAL_SEA_HEIGHT: u16 = 4;
-
-/// Mirrors `game_core::unit::is_sea`'s own corner test, but against `VISUAL_SEA_HEIGHT` instead of exactly
-/// `SEA_LEVEL` - see `VISUAL_SEA_HEIGHT`'s own doc comment for why this is a separate, render-only predicate.
-pub(crate) fn looks_like_sea(map: &Heightmap, (x, z): (i32, i32)) -> bool {
-    [(0, 0), (1, 0), (0, 1), (1, 1)].iter().all(|&(dx, dz)| map.get(x + dx, z + dz) <= VISUAL_SEA_HEIGHT)
+/// Whether the ground shader draws the cell as sea: the simulation's own open sea (`game_core::unit::is_sea`, all four
+/// corners sea points by the original's 3 × 3 rule, pop3-rev-analysis.md "Sea, shore and land"), so what is drawn
+/// as water is what drowns and floats a boat.
+pub(crate) fn looks_like_sea(map: &Heightmap, cell: (i32, i32)) -> bool {
+    game_core::unit::is_sea(map, cell)
 }
 
 /// Per cell (row-major), whether walkers may cross it: not sea on all four corners.
@@ -55,15 +46,15 @@ pub fn walkable_cells(map: &Heightmap) -> Vec<bool> {
 }
 
 /// Rewrites `walkable`'s own cells whose `looks_like_sea` could have changed after a height edit in `rect` (a
-/// `DirtyRect` in the same vertex coordinates terrain edits report): a cell's own footprint is corners
-/// `(x, z)..(x + 1, z + 1)` (`walkable_cells`'s own doc comment), so a changed vertex at `(x, z)` can move the
-/// four cells `(x - 1, z - 1)..(x, z)` - one cell short of `rect` on the min side, already covered by it on the
-/// max side. Keeps `walkable_cells`'s own full scan for the one legitimate "no existing cache yet" case (a level
+/// `DirtyRect` in the same vertex coordinates terrain edits report): a changed vertex at `(x, z)` can flip the sea
+/// bits of the points `(x - 1, z - 1)..(x + 1, z + 1)` (a sea point's 3 × 3 rule), and a point's bit belongs to
+/// the cells `(x - 1, z - 1)..(x, z)` around it (a cell's footprint is corners `(x, z)..(x + 1, z + 1)`), so the
+/// cells `rect.min - 2 ..= rect.max + 1`. Keeps `walkable_cells`'s own full scan for the one legitimate "no existing cache yet" case (a level
 /// switch, the first bake) instead of dirty-rect-limiting that too.
 pub fn rewalkable_cells(map: &Heightmap, rect: DirtyRect, walkable: &mut [bool]) {
     let n = map.size() as i32;
-    for z in rect.min.1 - 1..=rect.max.1 {
-        for x in rect.min.0 - 1..=rect.max.0 {
+    for z in rect.min.1 - 2..=rect.max.1 + 1 {
+        for x in rect.min.0 - 2..=rect.max.0 + 1 {
             let (ux, uz) = (x.rem_euclid(n) as usize, z.rem_euclid(n) as usize);
             walkable[uz * n as usize + ux] = !looks_like_sea(map, (x, z));
         }
@@ -250,25 +241,17 @@ mod tests {
         let mut m = Heightmap::new(8);
         m.set(4, 4, 500);
         let walk = walkable_cells(&m);
-        assert_eq!(walk.iter().filter(|&&w| w).count(), 4, "the four cells whose own footprint touches the peak corner");
-        // A cell (x, z)'s own footprint is corners (x, z)..(x+1, z+1): the peak at corner (4,4) touches cells
-        // (3,3), (4,3), (3,4) and (4,4).
-        assert!(walk[3 * 8 + 3] && walk[3 * 8 + 4] && walk[4 * 8 + 3] && walk[4 * 8 + 4]);
+        assert_eq!(walk.iter().filter(|&&w| w).count(), 16, "the peak and its 8 neighbours are land points, every cell touching one is land");
+        assert!((2..6).all(|z| (2..6).all(|x| walk[z * 8 + x])));
         assert!(!walk[0]);
     }
 
     #[test]
-    fn very_low_but_nonzero_ground_still_reads_as_sea_for_rendering() {
+    fn any_ground_above_sea_level_is_land_whatever_its_height() {
         let mut m = Heightmap::new(8);
-        for z in 0..8 {
-            for x in 0..8 {
-                m.set(x, z, VISUAL_SEA_HEIGHT); // at the threshold: still "sea"
-            }
-        }
-        assert!(walkable_cells(&m).iter().all(|&w| !w), "at the threshold, still treated as sea");
-        m.set(4, 4, VISUAL_SEA_HEIGHT + 1); // one above: no longer "sea"
-        let walk = walkable_cells(&m);
-        assert_eq!(walk.iter().filter(|&&w| w).count(), 4, "just past the threshold, walkable again");
+        assert!(walkable_cells(&m).iter().all(|&w| !w), "all at sea level: sea");
+        m.set(4, 4, 1);
+        assert_eq!(walkable_cells(&m).iter().filter(|&&w| w).count(), 16, "one unit up is land, as in the original");
     }
 
     #[test]

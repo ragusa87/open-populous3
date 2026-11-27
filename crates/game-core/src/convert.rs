@@ -226,8 +226,9 @@ mod tests {
     fn a_wildman_on_the_coast_steps_inland_and_waits_to_be_converted() {
         let mut map = land();
         for z in 30..50 {
-            map.terrain.set(42, z, 0);
-            map.terrain.set(43, z, 0);
+            for x in 41..=44 {
+                map.terrain.set(x, z, 0);
+            }
         }
         map.add_effect(effect(TribeId::Blue, AT, false));
         let w = map.spawn(Owner::Wild, UnitKind::Wildman, cells_off(1, 0)).id;
@@ -244,7 +245,9 @@ mod tests {
     fn inland_is_just_inside_the_nearest_land_cell() {
         let mut terrain = land().terrain;
         for z in 30..50 {
-            terrain.set(42, z, 0);
+            for x in 41..=43 {
+                terrain.set(x, z, 0);
+            }
         }
         let from = (41 * CELL + 400, 40 * CELL + 100);
         assert_eq!(inland_of(&terrain, from), Some((41 * CELL - 1 - INLAND_STEP_IN as u16, 40 * CELL + 100)), "the cell west, at its east edge");

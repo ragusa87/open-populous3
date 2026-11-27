@@ -899,16 +899,17 @@ mod tests {
 
     const C: i32 = 64;
 
-    /// Land at height 100 west of x = `C`, sea east of it, with an island at (`C` + 20, `C`).
+    /// Land west of x = `C`, open sea from cell `C` east, with an island at (`C` + 20, `C`): its height points one in
+    /// from the cells' edges, as a sea point needs its 8 neighbours at sea level too.
     fn coast() -> GameMap {
         let mut t = Heightmap::new(128);
         for z in 0..128 {
-            for x in 0..C {
+            for x in 0..C - 1 {
                 t.set(x, z, 100);
             }
         }
-        for z in C - 3..=C + 3 {
-            for x in C + 18..=C + 22 {
+        for z in C - 2..=C + 2 {
+            for x in C + 19..=C + 21 {
                 t.set(x, z, 100);
             }
         }

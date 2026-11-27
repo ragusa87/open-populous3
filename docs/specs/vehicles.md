@@ -7,7 +7,7 @@ numbers are guesses.
 ## The object (`Vehicle`, done)
 - Kept in `GameMap::vehicles`, a `Registry<Vehicle>` (typed `VehicleId`, the map's id counter).
 - `VehicleKind`: Boat or Balloon. Seats 5 / 2, a hard limit (vehicle table +0x8). Mobility `Sail` (water cells only,
-  all four corners at sea level: a shore cell with land in it is land for a boat) / `Fly` (anywhere, walls ignored). Cruise speed 110 world
+  all four corners sea points, units.md "Pathfinding": a shore cell with land in it is land for a boat) / `Fly` (anywhere, walls ignored). Cruise speed 110 world
   units per turn for both (`CRUISE`). Speed now (`Vehicle::speed`, `next_speed`): while its driver moves, up from
   at least 10 by ×56/32 a turn to cruise; while its driver is stopped (`driver_stopped`: a boat whose driver throws
   fire), down by ×22/32 a turn (1 below 6), standing still once at 1; 0 when not moving ("Driving: the driver is

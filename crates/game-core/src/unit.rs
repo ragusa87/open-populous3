@@ -2369,9 +2369,12 @@ mod tests {
         assert!(down < flat && flat < up, "down {down} < flat {flat} < up {up}");
     }
 
+    /// Makes the cell open sea: its corners and their neighbours at sea level (a sea point's 3 × 3 rule).
     fn sea_cell(t: &mut Heightmap, (x, z): (i32, i32)) {
-        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            t.set(x + dx, z + dz, 0);
+        for dz in -1..=2 {
+            for dx in -1..=2 {
+                t.set(x + dx, z + dz, 0);
+            }
         }
     }
 
@@ -2596,10 +2599,7 @@ mod tests {
         let (mut u, site) = shaman_at((10, 10));
         u.order(Order::Stop);
         u.x += 20 * 512;
-        let (cx, cz) = u.cell();
-        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            t.set(cx + dx, cz + dz, 0);
-        }
+        sea_cell(&mut t, u.cell());
         u.tick(Tick::ZERO, &t, Some(&site));
         assert_eq!((u.action, u.health.current()), (Action::Drowning { sunk: DROWN_SINK }, SHAMAN_MAX_HEALTH), "sinking, its health untouched");
         u.order(Order::MoveTo { x: 0, z: 0 });

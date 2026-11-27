@@ -409,9 +409,12 @@ mod tests {
         t
     }
 
+    /// Makes the cell open sea: its corners and their neighbours at sea level (a sea point's 3 × 3 rule).
     fn sea(t: &mut Heightmap, (x, z): (i32, i32)) {
-        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            t.set(x + dx, z + dz, 0);
+        for dz in -1..=2 {
+            for dx in -1..=2 {
+                t.set(x + dx, z + dz, 0);
+            }
         }
     }
 
@@ -447,11 +450,11 @@ mod tests {
 
     #[test]
     fn unreachable_targets() {
-        let ring = ["", "", "  #####", "  #...#", "  #...#", "  #...#", "  #####"];
+        let ring = ["", "", "  ########", "  ########", "  ##....##", "  ##....##", "  ##....##", "  ##....##", "  ########", "  ########"];
         let t = map(&ring);
-        assert_eq!(route(&t, Mobility::Walk, at((0, 0)), at((4, 4)), true), None, "walled-off island");
+        assert_eq!(route(&t, Mobility::Walk, at((0, 0)), at((5, 5)), true), None, "walled-off island");
         assert_eq!(route(&t, Mobility::Walk, at((0, 0)), at((2, 2)), true), None, "sea");
-        assert!(route(&t, Mobility::Walk, at((4, 4)), at((4, 5)), true).is_some(), "inside the island");
+        assert!(route(&t, Mobility::Walk, at((5, 5)), at((5, 6)), true).is_some(), "inside the island");
     }
 
     #[test]

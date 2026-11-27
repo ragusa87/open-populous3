@@ -149,12 +149,12 @@ mod tests {
     fn spots_stay_on_the_same_shore() {
         let mut t = land();
         for z in 0..128 {
-            for x in 12..15 {
+            for x in 12..=16 {
                 t.set(x, z, 0);
             }
         }
         let spots = free_spots_near(&t, (11 * PER_CELL + 1, 30), &BTreeSet::new(), 200);
-        assert!(spots.iter().all(|&s| spot_cell(s).0 <= 11), "never across the water");
+        assert!(spots.iter().all(|&s| spot_cell(s).0 <= 12), "never across the water (cells 13 and 14), cell 12 its shore");
         assert!(free_spots_near(&t, (13 * PER_CELL, 30), &BTreeSet::new(), 3).is_empty(), "target in the sea");
     }
 

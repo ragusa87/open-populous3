@@ -129,8 +129,10 @@ mod tests {
     fn a_fireball_landing_on_water_starts_no_ground_fire_but_still_blasts() {
         let mut map = bare();
         let cell = (cell_of(AT.0), cell_of(AT.1));
-        for &(dx, dz) in &[(0, 0), (1, 0), (0, 1), (1, 1)] {
-            map.terrain.set(cell.0 + dx, cell.1 + dz, 0);
+        for dz in -1..=2 {
+            for dx in -1..=2 {
+                map.terrain.set(cell.0 + dx, cell.1 + dz, 0);
+            }
         }
         let events = impact(Owner::Tribe(TribeId::Blue), AT, &map);
         assert!(!events.iter().any(|e| matches!(e, WorldEvent::SpawnEffect(eff) if matches!(eff.kind, EffectKind::GroundFire))), "no fire over open sea");

@@ -124,8 +124,10 @@ impl Heightmap {
         self.height_at(x as u32, z as u32, 512) < 1
     }
 
+    /// The height point's sea bit (pop3-rev-analysis.md "Sea, shore and land" [exe]): sea only when it and its 8
+    /// neighbours are all at sea level, so the coast sits one point further out than its last height-0 point.
     pub fn is_water(&self, x: i32, z: i32) -> bool {
-        self.get(x, z) == SEA_LEVEL
+        (-1..=1).all(|dz| (-1..=1).all(|dx| self.get(x + dx, z + dz) == SEA_LEVEL))
     }
 
     /// A low, inland cell (land all around, below a third of the peak) to frame a level;
@@ -401,7 +403,7 @@ mod tests {
         assert!(!m.is_water(10, 10) && !m.is_water(8, 10) && !m.is_water(12, 10), "flat disc out of the water");
         assert_eq!(m.get(9, 10), m.get(11, 11), "flat");
         assert_eq!(m.get(10, 7), m.get(10, 10) / 2, "ring: halfway from the sea");
-        assert!(m.is_water(10, 6), "beyond: untouched");
+        assert!(m.get(10, 6) == 0 && m.is_water(10, 5), "beyond: untouched, the sea from the point past the ring's neighbour");
     }
 
     #[test]
@@ -419,7 +421,7 @@ mod tests {
         assert_eq!(flat, (3 * 200) / 5, "average of the block (3 land, 2 sea points a row)");
         assert!([(7, 9), (11, 11), (9, 10)].iter().all(|&(x, z)| m.get(x, z) == flat), "flat block");
         assert_eq!(m.get(6, 10), (200 + flat) / 2, "land ring blended halfway");
-        assert!(m.is_water(12, 10), "sea beside it stays sea");
+        assert_eq!(m.get(12, 10), 0, "the sea beside it stays at sea level");
         assert_eq!(m.get(10, 13), 0, "beyond the ring: untouched");
     }
 

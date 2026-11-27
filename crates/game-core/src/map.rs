@@ -705,17 +705,17 @@ impl GameMap {
             map.trees.push(Tree::new((C + dx, C + dz), i as u8, crate::tree::MAX_SIZE));
         }
         let boat = |owner: TribeId, cell: (i32, i32)| Vehicle::new(VehicleKind::Boat, owner, at(cell.0, cell.1), crate::angle::Angle::new(512));
-        map.add_vehicle(boat(TribeId::Blue, (-2, 9)));
-        let manned = map.add_vehicle(boat(TribeId::Blue, (4, 9)));
+        map.add_vehicle(boat(TribeId::Blue, (-2, 10)));
+        let manned = map.add_vehicle(boat(TribeId::Blue, (4, 10)));
         for _ in 0..2 {
-            let u = map.spawn(TribeId::Blue, UnitKind::Brave, at(4, 9));
+            let u = map.spawn(TribeId::Blue, UnitKind::Brave, at(4, 10));
             u.aboard = Some(manned);
             let id = u.id;
             map.vehicles.get_mut(manned).unwrap().seat(id, TribeId::Blue);
         }
         map.add_vehicle(boat(TribeId::Blue, (10, 13)));
         map.add_vehicle(Vehicle::new(VehicleKind::Balloon, TribeId::Blue, at(3, -4), crate::angle::Angle::ZERO));
-        map.add_vehicle(boat(TribeId::Red, (0, 16)));
+        map.add_vehicle(boat(TribeId::Red, (0, 15)));
         map.update_walls();
         map.recompute_shading_all();
         map
@@ -3117,8 +3117,10 @@ mod tests {
         map.trees = vec![crate::tree::Tree::new((10, 10), 0, crate::tree::MAX_SIZE)];
         map.tick();
         assert_eq!(map.trees[0].size, crate::tree::MAX_SIZE, "still dry: untouched");
-        for &(x, z) in &[(10, 10), (11, 10), (10, 11), (11, 11)] {
-            map.terrain.set(x, z, 0);
+        for z in 9..=12 {
+            for x in 9..=12 {
+                map.terrain.set(x, z, 0);
+            }
         }
         map.tick();
         assert_eq!(map.trees[0].size, 0, "its cell is now open sea");
@@ -4613,8 +4615,10 @@ mod tests {
         m.units[i].carrying = 1;
         let to = slots::cell_centre((c + 3, c));
         m.apply(&Command::OrderUnit { player: TribeId::Blue, unit: ids[0], order: Order::MoveTo { x: to.0, z: to.1 } });
-        for (x, z) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            m.terrain.set(c + x, c + z, 0);
+        for z in -1..=2 {
+            for x in -1..=2 {
+                m.terrain.set(c + x, c + z, 0);
+            }
         }
         run(&mut m, 2);
         assert_eq!((unit(&m, ids[0]).carrying, m.wood.len()), (0, 0));
