@@ -612,11 +612,8 @@ pub struct Unit {
     stuck_watch: Option<(Tick, (u16, u16))>,
     /// Turns in a row it has not moved (capped): what it is doing may say walk while it waits (`stood_still`).
     still_ticks: u8,
-    /// Where it stands idle (`crate::idle`), kept while it does: a shuffle steps off it, never further. `[ours]`:
-    /// stands in for the original's remembered spot (`+0x4F`).
-    idle_spot: Option<(u16, u16)>,
-    /// A shuffle around `idle_spot` under way (`crate::idle`).
-    shuffle: Option<crate::idle::Shuffle>,
+    /// The turns left of a shuffle's hold (`crate::idle`): it has turned on the spot and stands still.
+    shuffle: Option<Countdown>,
     /// The building (id) this brave is assigned to, `Order::Build`.
     pub work: Option<BuildingId>,
     /// The building the unit is in: it walks out by its door before going anywhere.
@@ -693,7 +690,6 @@ impl Unit {
             idle_ticks: 0,
             stuck_watch: None,
             still_ticks: 0,
-            idle_spot: None,
             shuffle: None,
             work: None,
             inside: None,
@@ -713,29 +709,24 @@ impl Unit {
         self.work.is_some() || self.carrying > 0 || self.to_tree.is_some() || self.to_wood.is_some() || self.to_house.is_some() || self.to_shrine.is_some() || self.to_fire.is_some() || self.to_vehicle.is_some()
     }
 
-    /// Whether it is stepping in a shuffle (`crate::idle`): the client draws it walking.
+    /// Holding still after a shuffle's turn (`crate::idle`).
     pub fn shuffling(&self) -> bool {
-        self.shuffle.is_some_and(|s| s.to.is_some())
+        self.shuffle.is_some()
     }
 
     /// A follower standing idle on the ground (pop3-rev-analysis.md "Bored poses"): every `idle::CHECK` it may
-    /// shuffle a step off its spot and back to standing; anything else to do drops the spot and the shuffle.
-    fn stand_idle(&mut self, now: Tick, ground: &impl Ground) {
+    /// shuffle, turning ±135° on the spot and holding still; anything else to do drops the shuffle.
+    fn stand_idle(&mut self, now: Tick) {
         let follower = !matches!(self.kind, UnitKind::Wildman | UnitKind::AngelOfDeath);
         if !(follower && self.truly_idle() && self.in_the_open() && !self.motion.airborne() && self.is_alive()) {
-            (self.idle_spot, self.shuffle) = (None, None);
+            self.shuffle = None;
             return;
         }
-        let spot = *self.idle_spot.get_or_insert((self.x, self.z));
-        if let Some(mut s) = self.shuffle {
-            if let Some(to) = s.to
-                && self.step_towards(to, ground, self.kind.speed()) != Step::Moved
-            {
-                (s.to, self.facing) = (None, s.facing);
-            }
-            self.shuffle = (!s.left.tick()).then_some(s);
-        } else if let Some(crate::idle::Fidget::Shuffle { facing, hold }) = crate::idle::roll(self.id, now) {
-            self.shuffle = Some(crate::idle::Shuffle { to: Some(crate::idle::step_from(spot, facing)), facing, left: Countdown::new(hold) });
+        if let Some(mut left) = self.shuffle {
+            self.shuffle = (!left.tick()).then_some(left);
+        } else if let Some(crate::idle::Fidget::Shuffle { hold }) = crate::idle::roll(self.id, now) {
+            self.facing = crate::idle::turned(self.facing, hold);
+            self.shuffle = Some(Countdown::new(hold));
         }
     }
 
@@ -1073,7 +1064,7 @@ impl Unit {
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         self.idle_ticks = if self.truly_idle() { self.idle_ticks.saturating_add(1) } else { 0 };
         if self.action != Action::Idle {
-            (self.idle_spot, self.shuffle) = (None, None);
+            self.shuffle = None;
         }
         // Walking always counts; Attacking only while actually out in the open trying to walk somewhere
         // (`approach`) - aboard a vehicle it can legitimately sit still for good (firing from a stationary
@@ -1124,7 +1115,7 @@ impl Unit {
             (self.teleport_to, self.spell) = (None, None);
         }
         match self.action {
-            Action::Idle => self.stand_idle(now, ground),
+            Action::Idle => self.stand_idle(now),
             Action::Hammering | Action::Worshipping { .. } => {}
             Action::AroundFire { fire, point } => {
                 let next = (point + 1) % campfire::RING_POINTS;
@@ -2179,24 +2170,25 @@ mod tests {
     }
 
     #[test]
-    fn a_follower_standing_idle_shuffles_around_its_spot_and_a_wildman_does_not() {
+    fn a_follower_standing_idle_turns_on_the_spot_and_a_wildman_does_not() {
         let t = land();
         let start = crate::slots::cell_centre((10, 10));
-        let walk = |kind| {
+        let stand = |kind| {
             let mut u = Unit::new(Id::from_raw(7), TribeId::Blue, kind, start);
             let mut seen = Vec::new();
             for k in 1..32 * 64 {
                 u.tick(Tick::from_wire(k), &t, None);
-                seen.push(((u.x, u.z), u.shuffling(), u.action));
+                seen.push(((u.x, u.z), u.facing, u.shuffling(), u.action));
             }
             seen
         };
-        let brave = walk(UnitKind::Brave);
-        assert!(brave.iter().all(|&(_, _, a)| a == Action::Idle), "still idle all along");
-        assert!(brave.iter().any(|&(_, stepping, _)| stepping));
-        assert!(brave.iter().any(|&(at, _, _)| at != start) && brave.iter().any(|&(at, stepping, _)| at == start && !stepping), "steps off and back");
-        assert!(brave.iter().all(|&(at, _, _)| crate::map::torus_dist2(at, start) <= (crate::idle::SHUFFLE_STEP as i64 * 2).pow(2)), "never drifts");
-        assert!(walk(UnitKind::Wildman).iter().all(|&(at, stepping, _)| at == start && !stepping));
+        let brave = stand(UnitKind::Brave);
+        assert!(brave.iter().all(|&(at, _, _, a)| at == start && a == Action::Idle), "never steps");
+        assert!(brave.iter().any(|&(.., holding, _)| holding) && brave.iter().any(|&(.., holding, _)| !holding));
+        let turns: Vec<u8> = brave.windows(2).filter(|w| w[0].1 != w[1].1).map(|w| (w[1].1 + 8 - w[0].1) % 8).collect();
+        assert!(!turns.is_empty() && turns.iter().all(|&d| d == 3 || d == 5), "±135°: {turns:?}");
+        assert!(brave.windows(2).all(|w| w[0].1 == w[1].1 || !w[0].2), "turns only when a hold starts");
+        assert!(stand(UnitKind::Wildman).iter().all(|&(at, f, holding, _)| at == start && f == 0 && !holding));
     }
 
     #[test]
@@ -2209,7 +2201,7 @@ mod tests {
         }).unwrap();
         u.action = Action::Walking { to: crate::slots::cell_centre((14, 10)) };
         u.tick(Tick::from_wire(k + 1), &t, None);
-        assert_eq!((u.idle_spot, u.shuffle), (None, None));
+        assert_eq!(u.shuffle, None);
     }
 
     #[test]

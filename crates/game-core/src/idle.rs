@@ -1,10 +1,10 @@
 //! A follower standing idle (pop3-rev-analysis.md "Bored poses", person state 19): every 32 turns, on its own
-//! phase, a roll for a short shuffle around its spot or a bored pose (drawn by the client, `units::art::bored`).
+//! phase, a roll for a shuffle (a turn on the spot, held a while) or a bored pose (drawn by the client,
+//! `units::art::bored`).
 
 use crate::map::Lcg;
-use crate::time::{Countdown, Every, Tick, Ticks};
+use crate::time::{Every, Tick, Ticks};
 use crate::unit::UnitId;
-use pop3_format::WORLD_UNITS_PER_CELL;
 
 /// The standing loop's check: every 32 turns on the unit's own phase ("Bored poses").
 pub const CHECK: Every = Every::new(32);
@@ -15,14 +15,13 @@ const BORED_ABOVE: u32 = 60;
 /// A shuffle lasts `4..=31` turns ("Bored poses", "Tumbling and ground recovery").
 const SHUFFLE_MIN: u32 = 4;
 const SHUFFLE_SPAN: u32 = 28;
-/// How far from its spot a shuffle steps: a guess, the trace only says "a step". Kept inside its standing spot
-/// (`slots::PER_CELL`), which holds one person each.
-pub const SHUFFLE_STEP: i32 = WORLD_UNITS_PER_CELL as i32 / 8;
+/// A shuffle turns 135° (768 of 2048), 3 eighths of a turn: + when its hold is odd, - when even ("Bored poses").
+const SHUFFLE_TURN: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fidget {
-    /// Face `facing`, step that way off its spot, stand there until `hold` ends.
-    Shuffle { facing: u8, hold: Ticks },
+    /// Turn on the spot (`turned`) and stand still until `hold` ends.
+    Shuffle { hold: Ticks },
     Bored,
 }
 
@@ -39,7 +38,7 @@ pub fn roll(id: UnitId, now: Tick) -> Option<Fidget> {
     if bored {
         Some(Fidget::Bored)
     } else if shuffle {
-        Some(Fidget::Shuffle { facing: (rng.next_u32() & 7) as u8, hold: Ticks::new(SHUFFLE_MIN + rng.next_u32() % SHUFFLE_SPAN) })
+        Some(Fidget::Shuffle { hold: Ticks::new(SHUFFLE_MIN + rng.next_u32() % SHUFFLE_SPAN) })
     } else {
         None
     }
@@ -51,20 +50,11 @@ pub fn last_check(id: UnitId, now: Tick) -> Tick {
     Tick::from_wire(now.to_wire().wrapping_sub(elapsed))
 }
 
-/// A shuffle under way: the point it steps to (`None` once there or blocked), the way it then faces, and how
-/// long it lasts in all.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Shuffle {
-    pub to: Option<(u16, u16)>,
-    pub facing: u8,
-    pub left: Countdown,
-}
-
-/// One step of `SHUFFLE_STEP` from `spot` towards heading `facing` (0 = +z, 2 = +x, 4 = -z, 6 = -x).
-pub fn step_from((x, z): (u16, u16), facing: u8) -> (u16, u16) {
-    const DIAGONAL: i32 = 181;
-    let (dx, dz): (i32, i32) = [(0, 256), (DIAGONAL, DIAGONAL), (256, 0), (DIAGONAL, -DIAGONAL), (0, -256), (-DIAGONAL, -DIAGONAL), (-256, 0), (-DIAGONAL, DIAGONAL)][facing as usize & 7];
-    (x.wrapping_add((dx * SHUFFLE_STEP / 256) as u16), z.wrapping_add((dz * SHUFFLE_STEP / 256) as u16))
+/// The facing (eighths of a turn) after a shuffle held `hold` from `facing`: ±135°, its sign from the hold's
+/// parity, so the one roll draws both ("Bored poses" [exe]). Kept afterwards: no turn back.
+pub fn turned(facing: u8, hold: Ticks) -> u8 {
+    let by = if hold.get() % 2 == 1 { SHUFFLE_TURN } else { 8 - SHUFFLE_TURN };
+    (facing + by) % 8
 }
 
 #[cfg(test)]
@@ -95,11 +85,9 @@ mod tests {
     }
 
     #[test]
-    fn a_step_stays_inside_its_standing_spot_whichever_way() {
-        assert_eq!(step_from((1000, 1000), 0), (1000, 1064));
-        assert_eq!(step_from((1000, 1000), 6), (936, 1000));
-        assert_eq!(step_from((0, 0), 4), (0, 65472), "wraps");
-        let centre = crate::slots::spot_centre((10, 10));
-        assert!((0..8).all(|f| crate::slots::spot_of(step_from(centre, f)) == (10, 10)));
+    fn a_shuffle_turns_135_degrees_its_way_from_the_hold_s_parity() {
+        assert_eq!(turned(0, Ticks::new(5)), 3);
+        assert_eq!(turned(0, Ticks::new(4)), 5);
+        assert_eq!(turned(6, Ticks::new(31)), 1, "wraps");
     }
 }

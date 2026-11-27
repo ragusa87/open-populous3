@@ -225,7 +225,7 @@ const TAUNT_DISPLAY: Ticks = Ticks::new(12);
 
 /// The pose `u` is drawn in: aboard a vehicle and idle or waiting to throw, pedalling it; killed by
 /// lightning, carbonized until its spirit rises; waiting in a challenge and recently taunted, one of 3;
-/// stepping in an idle shuffle, walking; else by its action (`pose_for`). `kind`: the kind it is shown as (`Unit::shown_kind`), for its bored pose.
+/// else by its action (`pose_for`). `kind`: the kind it is shown as (`Unit::shown_kind`), for its bored pose.
 /// `now`: the drawn moment, for the taunt's own short display window.
 pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
     if u.aboard.is_some() && matches!(u.action, Action::Idle | Action::Attacking { .. }) {
@@ -252,9 +252,6 @@ pub fn pose_of(u: &game_core::unit::Unit, kind: UnitKind, now: Tick) -> Pose {
         && let Some(b) = bored(kind, u.id, now)
     {
         return b.pose;
-    }
-    if u.action == Action::Idle && u.shuffling() {
-        return if u.carrying > 0 { Pose::CarryWalk } else { Pose::Walk };
     }
     pose_for(&u.action, u.carrying > 0, u.motion.airborne())
 }
