@@ -36,6 +36,13 @@ the original pile of logs (`hfx0-0.dat` 23, see sprites.md, Scale2x-upscaled as 
 bundled `assets/sprites/wood_pile.png`: three logs with light cut ends in the same 17 x 11 pixel size, upscaled
 the same way.
 
+## Plants (done: `game_core::plant`, client `plants.rs`)
+A level's scenery 7 and 8 (`GameMap::plants`, `plant::plants_from_level`): decoration only, nothing ticks them,
+wildmen do not eat by them yet (units.md). Each is one camera-facing sprite of `hfx0-0.dat` (`PLANT_SPRITES`): 2
+a tuft of dry reeds, 3 reeds with flower heads, bottom-centred on it like the volcano's rocks, never turning nor
+moving (pop3-rev-analysis.md "Scenery looks: plants and prayer heads" [exe]). With the original files only: our
+own maps have none.
+
 ## On screen (client, `nature.rs`)
 Drawn as 3D models standing on the terrain (`Grounded`, trunk footprint 0.15 cell), turned by a fixed per-tree
 angle (`tree_yaw`), scaled with the size (`size_factor`: 40% at size 1 to full at size 4), hidden at size 0.

@@ -19,6 +19,9 @@ pub const SHIELD_SPRITES: std::ops::RangeInclusive<usize> = 1538..=1552;
 pub const BLOODLUST_SPRITES: std::ops::RangeInclusive<usize> = 1478..=1487;
 /// Hypnotised: a yellow ring turning, a halo (11 frames, 27 x 19).
 pub const HYPNOSIS_SPRITES: std::ops::RangeInclusive<usize> = 1553..=1563;
+/// The plants (scenery 7, 8, pop3-rev-analysis.md "Scenery looks: plants and prayer heads"): one frame each in
+/// `EFFECT_SPRITE_FILE`, a tuft of dry reeds (20 x 15) and reeds with flower heads (25 x 22).
+pub const PLANT_SPRITES: [usize; 2] = [2, 3];
 /// The yellow down arrow over the player's selected people (9 x 7, opaque).
 pub const SELECTED_ARROW_SPRITE: usize = 53;
 /// Volcano's decorative rolling rocks (pop3-rev-analysis.md "Volcano rocks"): 4 opaque frames in

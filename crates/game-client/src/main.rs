@@ -90,6 +90,7 @@ mod volcano_rocks;
 mod whirlwind;
 mod virtual_cursor;
 mod wood;
+mod plants;
 mod world;
 
 use bevy::prelude::*;
@@ -145,7 +146,7 @@ fn main() {
             effects::EffectsPlugin,
             blueprint::BlueprintPlugin),
             units::UnitsPlugin,
-            wood::WoodPlugin,
+            (wood::WoodPlugin, plants::PlantsPlugin),
             hover::HoverPlugin,
             editor::EditorPlugin,
             hud::HudPlugin,

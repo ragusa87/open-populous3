@@ -103,6 +103,8 @@ pub struct GameMap {
     pub hidden_points: Registry<crate::hidden_point::HiddenPoint>,
     /// Ground left in ashes by destroyed buildings (`crate::ashes`).
     pub ashes: crate::ashes::Ashes,
+    /// The level's plants, decoration only (`crate::plant`).
+    pub plants: Vec<crate::plant::Plant>,
     /// Per-cell blend/light/downhill, derived from `terrain` (+ `ashes`/active lava), kept current by
     /// `recompute_shading` (`shading.rs`); the client's terrain texture bake reads it, nothing in the
     /// simulation does.
@@ -198,7 +200,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, fog: None, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), multiplayer: false, tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, fog: None, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), plants: Vec::new(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), multiplayer: false, tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -251,6 +253,7 @@ impl GameMap {
             patrol_points: Registry::default(),
             hidden_points: Registry::default(),
             ashes: Default::default(),
+            plants: crate::plant::plants_from_level(level),
             shading: CellShading::new(MAP_SIZE, SunParams::default()),
             outcome: None,
             melee_wins: [0; TRIBES],

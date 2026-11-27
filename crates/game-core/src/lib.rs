@@ -66,6 +66,7 @@ pub mod panicking_blast;
 pub mod patrol;
 pub mod path;
 pub mod physics;
+pub mod plant;
 pub mod placement;
 pub mod production;
 pub mod schedule;
