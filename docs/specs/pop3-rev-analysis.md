@@ -6927,6 +6927,77 @@ equivalent: they call into task 24's own handler, a parallel mechanism, not `0x4
 itself. See `ai-scripts.md`'s "Markers, guards and the base" for the PopScript-level command reference this
 confirms.
 
+### Level 1, live: when red trains, and what the bridge really triggers [measured]
+Two live runs of the campaign's level 1 (red runs `cpscr010`, ai-scripts.md "Worked example"). Run 1 played the
+level the normal way (totem prayers, Land Bridge to the vault island, red brave killed, shaman in the vault,
+warrior hut built, 4 warriors trained, head prayers for Lightning, second Land Bridge onto red's island around
+turn 22 100, 3 warriors sent into red's village). Run 2 killed red's warriors twice (turn 145 and turn 2485, red
+with 3 then 8 braves) to watch the replacement. Every person, red's script variables and red's attribute values
+were read every turn (raw logs and method: pop3-rev `docs/cheat.md` "Level 1 AI training, live").
+
+**Red never trains on its own initiative.**
+- Start: red has 2 braves, 2 warriors, a shaman, one large hut and a warrior training hut. Run 1, 26 000 turns
+  (36 min): red stayed at exactly 2 warriors the whole time. It only grew braves from its hut (one every ~200-250
+  turns, up to 10) and banked its mana (426 000 by turn 26 112, never spent on training).
+- Red's live attribute values: `PREF_WARRIOR_PEOPLE`, `PREF_FIREWARRIOR_PEOPLE`, `PREF_RELIGIOUS_PEOPLE`,
+  `PREF_SPY_PEOPLE` and all four `PREF_*_TRAINS` are **0**. The script never sets the `PREF_*_PEOPLE` ones and
+  nothing else does: an attribute the script doesn't set is 0, not a built-in default, so the native "train
+  people" task never has a shortfall to fill. The `cpatr010.dat` file's bytes (20 at index 7) are not what the
+  game uses.
+- Other values read live: `MAX_TRAIN_AT_ONCE` 1, `MAX_BUILDINGS_ON_GO` 1, `HOUSE_PERCENTAGE` 3,
+  `ATTACK_PERCENTAGE` 45, `MAX_ATTACKS` 1, `AWAY_WARRIOR` 34, `RETREAT_VALUE` 50, `SHAMEN_BLAST` 128,
+  `SPY_DISCOVER_CHANCE` 30, `ENEMY_SPY_MAX_STAND` 255, `EXPANSION` 12, and `SPELL_DELAY` 12 (not set by the
+  script). `AWAY_BRAVE` read 67 once blue had 4 warriors: the script's every-128-turns rule (34 / 67 / 100 for
+  1-3 / 4-12 / 13+ blue warriors) runs as written.
+
+**The only training is the script's replacement rule** ("every 128 turns: if I have no warrior,
+`TRAIN_PEOPLE_NOW 1 WARRIOR`").
+- It runs on turns that are multiples of 128, so a warrior killed just after one waits up to 128 turns.
+- Each call sends ONE idle brave (out of its hut if needed) to the warrior hut. The call repeats every 128 turns
+  for as long as the warrior count is still 0, and that count only rises when a warrior comes out, not when a
+  brave is sent. So the number of warriors made = the number of 128-turn ticks spent at 0 warriors that found an
+  idle brave.
+- `MAX_TRAIN_AT_ONCE` 1: the second brave waits outside until the first has come out, then goes in.
+- Measured:
+
+| Kill at | Red braves | Tick → brave sent | Brave at the door | Warrior out | Inside |
+|---|---|---|---|---|---|
+| 145 | 3 | 256 | 335 | 585 | 250 turns |
+| | | 384 | 619 (queued) | 905 | 286 turns |
+| | | 512: no idle brave, nothing sent | | | |
+| | | 640: 1 warrior, rule stops | | | |
+| 2485 | 8 | 2560 | 2635 | 2765 | 130 turns |
+| | | 2688 | 2799 | 2929 | 130 turns |
+| | | 2816: 1 warrior, rule stops | | | |
+
+  Both times red ended with exactly 2 warriors again, the count it starts with. A third is only possible when the
+  first trainee takes more than ~256 turns from its tick to coming out and a third idle brave exists at that tick
+  (run 2's first round came close: the 512 tick found no idle brave).
+- Why one red warrior took 250-286 turns and later ones 130 is not resolved (red's bank was far above the cost
+  both times; the training building's own mana store and fill rate, "Training buildings" above, is the likely
+  cause).
+- For comparison, blue (human) in run 1: 4 braves sent into a new warrior hut together came out as warriors one at
+  a time, exactly 100 turns apart (turns 16 169, 16 269, 16 369, 16 469). One live answer to "Training
+  buildings"' open "one at a time vs five together" question: one at a time, at least for a fresh hut.
+
+**The bridge alone triggers nothing offensive.**
+- Red's land-connection check (`$50` in ai-scripts.md's worked example) is confirmed: after the first Land Bridge
+  (blue's island to the vault island, run 1 turn ~7 100) the first strip's height sum went positive at the next
+  32-turn check and kept rising as the land rose; after the second (vault island to red's island) `$50` went 0 →
+  132 → 616 on the next two checks. Nothing else in red changed.
+- Red's scripted raid needs `$50 > 0` AND more than 2 red warriors AND at least 1 blue warrior AND a blue person
+  within 7 cells of marker 3 (the vault island). Red never has more than 2 warriors (above), so the raid never
+  fired. The script's other attack, the "last stand", needs `$50 == 1` exactly; the height sum over five cells of
+  land reads in the hundreds, so it never fires either.
+- What the player sees as "the bridge makes the AI attack" is **base defence**: in run 1, 3 blue warriors walking
+  onto red's island were met about 220 turns after the order, when they came within red's defence radius (the
+  script's `SET_DEFENCE_RADIUS 7`), by red's free warrior and then 6 braves, all given an order within ~30 turns
+  and fighting at once. Result: 6 red braves and 1 red warrior died, then the 3 blue warriors. The red shaman
+  did not take part; red's housed warrior came out only after the fight.
+- Killing red's shaman ends the level at once: with the script's reincarnation switch off, every red person died
+  on the same turn as the shaman (Lightning on a group, turn 26 140; 7 deaths including braves 10 cells away), and
+  "Niveau réussi" showed.
+
 ## Fog of war [exe]
 Level flag 0x01 (levels 9 and 18 in the campaign; also the cheat menu's "Fog of war" item). It is a shroud of
 *explored* land, not a line-of-sight fog: nothing is hidden again once seen, and nothing about what units can

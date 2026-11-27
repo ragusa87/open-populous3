@@ -837,9 +837,12 @@ is a pure runtime switch, independent of whether a shaman/site thing exists).
   the check (height-sum over a short straight run, re-armed every 32 ticks) reads as "is there now land/a bridge
   across this stretch" rather than a timer or aggro check - consistent with red staying passive until the human
   crosses to its side. `INT_ATTR_MAX_ATTACKS 1` then caps the scripted side to that one raid (plus the separate
-  last-stand once `$50 == 1` exactly and red is wiped down to 0 warriors). **Not traced against the exe**: this
-  reading of `$50` is this session's own inference from the decoded script and the files' own marker/height
-  data, not confirmed live or in the disassembly.
+  last-stand once `$50 == 1` exactly and red is wiped down to 0 warriors). **Confirmed live** (pop3-rev-analysis.md
+  "Level 1, live: when red trains, and what the bridge really triggers"): a Land Bridge across a strip makes its
+  sum positive at the next 32-turn check, and the second bridge set `$50` (616). But neither attack ever fires in
+  practice: red never has more than 2 warriors (its `PREF_*_PEOPLE` are all 0, and the 128-turn
+  `TRAIN_PEOPLE_NOW` rule only refills it from 0, to 2 in both measured cases), and `$50` is in the hundreds,
+  never exactly 1. What reacts when the human crosses is red's base defence (`STATE_DEFEND_BASE`, radius 7).
 
 ### Attributes (`INT_ATTR_*`)
 | Attribute | Meaning, usual values |
