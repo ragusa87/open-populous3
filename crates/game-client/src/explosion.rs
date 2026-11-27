@@ -1,5 +1,6 @@
 //! A building blowing up, drawn only (the simulation just removes it): its model's polygons fly off on their own,
-//! spinning, out from the middle and up, fall back, lie on the ground a moment and shrink away. Started by a
+//! spinning, out from the middle and up, and each is gone the moment it lands (pop3-rev-analysis.md "Flying faces
+//! (the partial explosion)" [exe]). Started by a
 //! `BuildingExploded` message while the building's view is still drawn: its meshes are copied, so the explosion
 //! looks like whatever drew the building. Poses follow simulation time from the start tick, seeded by the
 //! building's id. In the buildings sandbox, its row of `SANDBOX_BLASTS` blows up in a loop.
@@ -18,10 +19,8 @@ use game_core::building::{Building, BuildingId};
 use game_core::map::{sandbox_blast_corner, GameMap, SANDBOX_BLASTS, SANDBOX_BUILDINGS};
 use game_core::time::{Tick, Ticks};
 
-/// Seconds from the blast until the last polygon is gone.
+/// Seconds from the blast until the explosion is let go: every polygon has landed by then.
 pub const DURATION: f32 = 3.0;
-/// Seconds over which the polygons shrink away, at the end.
-const FADE: f32 = 0.8;
 /// Gravity, cells per second squared.
 const GRAVITY: f32 = 12.0;
 /// Speed out from the middle, cells per second: the first plus up to the second.
@@ -133,8 +132,7 @@ fn between((low, span): (f32, f32), r: f32) -> f32 {
 }
 
 /// Where polygon `k` (its middle at `middle`) is `t` seconds after the blast, and how it is turned and scaled
-/// about its middle: thrown out from the middle and up, spinning, until it lands (stays as it landed), then
-/// shrinking away over the last `FADE`.
+/// about its middle: thrown out from the middle and up, spinning, until it lands, then gone (scale 0).
 pub fn pose(middle: Vec3, seed: u32, k: usize, t: f32) -> (Vec3, Quat, f32) {
     let t = t.max(0.0);
     let flat = Vec2::new(middle.x, middle.z);
@@ -147,7 +145,7 @@ pub fn pose(middle: Vec3, seed: u32, k: usize, t: f32) -> (Vec3, Quat, f32) {
     let at = middle + Vec3::new(out.x * flying, up * flying - 0.5 * GRAVITY * flying * flying, out.y * flying);
     let axis = Vec3::new(draw(seed, k, 4) - 0.5, draw(seed, k, 5) - 0.5, draw(seed, k, 6) - 0.5).normalize_or(Vec3::X);
     let turn = Quat::from_axis_angle(axis, between(SPIN, draw(seed, k, 7)) * flying);
-    let scale = ((DURATION - t) / FADE).clamp(0.0, 1.0);
+    let scale = if t < landing { 1.0 } else { 0.0 };
     (at, turn, scale)
 }
 
@@ -339,21 +337,14 @@ mod tests {
     }
 
     #[test]
-    fn polygons_fly_out_and_up_then_lie_on_the_ground() {
+    fn polygons_fly_out_and_up_and_are_gone_once_they_land() {
         let middle = Vec3::new(1.0, 1.0, 0.0);
-        let (early, _, _) = pose(middle, 3, 0, 0.1);
-        assert!(early.x > middle.x && early.y > middle.y, "out and up: {early}");
-        let (landed, turn, _) = pose(middle, 3, 0, 2.0);
-        assert!(landed.y.abs() < 1e-3, "on the ground: {landed}");
-        assert_eq!(pose(middle, 3, 0, 2.5).1, turn, "no longer spinning");
-    }
-
-    #[test]
-    fn they_shrink_away_at_the_end() {
-        let middle = Vec3::ONE;
-        assert_eq!(pose(middle, 1, 0, 0.5).2, 1.0);
-        assert!(pose(middle, 1, 0, DURATION - FADE / 2.0).2 < 1.0);
-        assert_eq!(pose(middle, 1, 0, DURATION).2, 0.0);
+        let (early, _, scale) = pose(middle, 3, 0, 0.1);
+        assert!(early.x > middle.x && early.y > middle.y && scale == 1.0, "out and up: {early}");
+        let (landed, _, scale) = pose(middle, 3, 0, 2.0);
+        assert!(landed.y.abs() < 1e-3 && scale == 0.0, "landed and gone: {landed}");
+        let falling = (1..200).map(|k| k as f32 / 100.0).take_while(|&t| pose(middle, 3, 0, t).2 > 0.0).last().unwrap();
+        assert!(pose(middle, 3, 0, falling).0.y > 0.0, "drawn only while in the air");
     }
 
     #[test]

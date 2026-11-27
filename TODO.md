@@ -658,9 +658,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   open, same as before: whether a second, not-yet-traced mechanism (same section, `0x4089AC`) also drives a
   building-local flame-intensity distinct from this door-point object - not resolved, so not a basis for a fix.
 - [ ] Ashes (combat.md "Ashes"): the hover text ("damaged ground", our words), the long damage smoke over them, the whirlwind's destruction. Lava and earthquake ground sharing the mark is done (`lava.rs`'s `WorldEvent::Scorch`, both `Mode::Static` and `Mode::Flowing`).
-- [ ] Building debris (client `explosion.rs`), as the original (pop3-rev-analysis.md "Flying faces (the partial
-  explosion)"): a piece vanishes the moment it lands, with a dust puff and sound 0x13 (a splash in water), instead
-  of lying there and shrinking away over 3 s.
+- [ ] Building debris (client `explosion.rs`, pop3-rev-analysis.md "Flying faces (the partial explosion)"): a piece is gone the moment it lands (done); left: its dust puff and sound 0x13 there (a splash in water).
 - [ ] Construction and damage look for original objects, as the original (pop3-rev-analysis.md "Drawing a
   building by stage"): drop the edge beams and the height-sorted `built_part` (client `construction.rs`); draw the
   building's own mesh with only the faces whose `facs` byte 59 has bit `stage` set, those with bit `4 + stage`

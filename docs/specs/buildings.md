@@ -315,14 +315,14 @@ A building that blows up is drawn only, the simulation just removes it (`game-cl
 `BuildingExploded { building, start }` message copies the building's view while it is still drawn, whatever drew it
 (original model, generated kit, stand-in box). Each polygon (triangles sharing a corner: a quad, a flat face) flies
 on its own: out from the middle and a little to the side, up, spinning about its own axis, falls back under gravity
-and lies where it landed, then every polygon shrinks away; gone 3 s after the blast. Poses are functions of the start
+and is gone the moment it lands, as the original's (pop3-rev-analysis.md "Flying faces (the partial explosion)"
+[exe]); the explosion is let go 3 s after the blast. Poses are functions of the start
 tick and the drawn moment, seeded by the building's id. The buildings sandbox has a row of built huts (sizes 1-3),
 training units (not the temple), vehicle huts and the prison (`SANDBOX_BLASTS`, south) that blows up in a loop: it
 stands 2 s, blows up, and is built again (new ids, so each round flies its own way) once the explosion is over.
 Started by that loop, the dev hook `EXPLODE=building:N`, and for real by a building's own foundation check
 shattering it on uneven ground ("Foundation" below).
-The original's pieces do not lie on the ground [exe]: one piece per face, each deleted the turn it lands, with a
-dust puff and sound 0x13 (a splash in water) (pop3-rev-analysis.md "Flying faces (the partial explosion)").
+Not done: the original's dust puff and sound 0x13 where a piece lands (a splash in water).
 
 ### Damage and repair
 The level files store every building as a finished one (level-format.md, building union), but in level 10 the
