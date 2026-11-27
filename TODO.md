@@ -1872,6 +1872,10 @@ Level/world correctness that is mostly stable already (terrain especially: exten
 - [ ] Level names instead of the header's "Level N": `pop3_format::language` reads the texts ([language.md](docs/specs/language.md)); find which text number names each level (open there), find the install's `language/` dir like `data/`, pick the language (a setting, English by default).
 - [ ] Our own texts in Fluent (`assets/lang/<lang>.ftl`, named keys), a key -> original text number table, lookup from `langNN.dat` with the original files and from our `.ftl` otherwise ([language.md](docs/specs/language.md) "Our texts and the fallback"); when the game first shows translatable text.
 - [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
+- [ ] Object shading, **question for a spec session**: how the original lights a building's (any object's) faces.
+  What the per-point bytes 48..58 of a face hold (objects.md "Records": "per-point shade (?)"), whether the light
+  is fixed in the world or follows the view, and how dark a face turned away from it gets (a `fade` row?). Ours:
+  one fixed sun (`camera.rs`, the terrain's) plus a weak ambient, so seen against the sun a building is almost black.
 
 ## Priority 4 — presentation and UX polish
 Additive and mostly independent of the tiers above: chip away at these alongside anything else.
