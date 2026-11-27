@@ -137,6 +137,12 @@ so a live measurement may run on it with the addresses translated.
   edit - but that vector is `sunX=sunZ=sunBase=147` always (`sunlight_init_default` 0x401040's hardcoded
   constant), NOT derived from the level's `ShadeStart`/`ShadeRange`/`Inclination`, confirmed live on two levels
   with different on-disk `Inclination`. See "Terrain land colour".
+- **A model face is lit flat, from a world-fixed sun: 88 % to 100 % plus a warm glint up close, darker with
+  distance (about 47 % to 91 % at the focus point)** [exe]: `facs` bytes 48..55 are the face's normal as a 10-bit (pitch, yaw) code for each of the 4 heading
+  quarters; the code indexes a 1024-entry table `ShadeStart + ShadeRange * max(0, n . sun)` (28..42 with the
+  shipped 28/15 and the fixed sun (1, 1, 1)/√3), and a shade below 32 is grey `shade * 8`, 32 and up full white
+  plus an orange specular; from 12 cells in front of the camera the shade drops one step per cell. Face word 0 is
+  that code at run time, not a colour. See "Object face shading".
 - **Constants**: `constant.dat` overrides the exe defaults, which differ a lot. Percent constants are 8.8 fixed
   point at run time (`value * 256 / 100`), which fits our integer-only simulation.
 - **The camera's pitch is fixed only at the idle zoom level - manual zoom input AND an AI-script flyby both
@@ -3043,6 +3049,92 @@ point is `scale / 65536` cells, the same on all three axes.
 - The pyramid of knowledge (points 1746 high, ±536 wide): 1023 high (4.0 cells), 2.45 cells across in x and 2.54 in z.
 - A building on a cell whose flag 0x2 is set takes the ground height under each vertex, otherwise the thing's height.
 
+### Object face shading: a fixed sun, one shade per face [exe]
+Every face of a 3D model (buildings, huts, vehicles, scenery models) gets ONE brightness, flat over the face,
+from its normal against a sun fixed in the world. Nothing follows the camera; no face is ever dark.
+
+**The face's normal is stored in the file, as a 10-bit code, once per quarter turn.** `facs` bytes 48..55 (offset
+0x30) are four u16 codes, one per heading quarter (bytes 56..57, a fifth u16, are read by no model renderer).
+A code packs two angles of 64 steps of the 2048-step circle (11.25°):
+```text
+code  = pitch_step * 32 + yaw_step              # 0..1023; pitch_step, yaw_step 0..31
+yaw   = yaw_step * 64,  pitch = pitch_step * 64 # 2048 = a full turn
+dir   = (cos pitch * sin yaw,  sin pitch,  cos pitch * cos yaw)   # (A, B, C), B = up
+```
+Checked on every bank-0 face against the normal of its own points ((p1 - p0) x (p2 - p0), objects.md "Records"):
+code 0 gives `A = n.z, B = n.y, C = n.x` (94 % of faces within the 11° quantisation; the rest are the winged
+death's morphed frames and faces flagged dynamic, below), and codes 1-3 are the same normal turned by 1, 2, 3
+quarter turns. The exe never computes them at load: they come straight from the file.
+
+Per frame, before drawing, each face picks its code (written over the face's word 0, which is therefore not a
+colour - see "Impact"):
+```text
+if face word 4 bit 0:            code = encode(normal of the face's points, already rotated into the world)
+else:                            code = face.codes[heading / 512]          # heading 0..2047, the thing's angle
+```
+Bit 0 of word 4 is set on the trees (bank-0 objects 14 and 17 seen), whose points move.
+
+**Shade table** (`sunlight_init_2`, rebuilt at level load and whenever the sun or the sunlight block change):
+```text
+for code in 0..1023:
+    (A, B, C) = dir(code)                       # unit vector, x 256
+    dot = sunZ*A + sunBase*B + sunX*C            # sunX = sunZ = sunBase = 147 in play ("Terrain land colour")
+    shade[code] = ShadeStart + (ShadeRange * max(dot, 0)) / 65536
+```
+With the fixed 147s the sun is the direction (A, B, C) = (1, 1, 1) / √3: in a model's own axes at heading 0,
+up and towards +x and +z (whether that is the terrain's sun corner too depends on how model axes map to map axes,
+not checked). The model turns with its building, the sun does not: the light is fixed in the world.
+With the level's ShadeStart 28 and ShadeRange 15 (both levels measured; the level load reads its 3-byte sunlight
+block, then rebuilds the table):
+
+| Face normal | dot / 65536 | shade |
+|---|---|---|
+| facing the sun exactly | 0.99 | 42 |
+| straight up, or a wall facing +x or +z | 0.57 | 36 |
+| a wall facing between +x and +z | 0.81 | 40 |
+| turned away from the sun (any, down included) | 0 (clamped) | 28 |
+
+A second 1024 table (`ShadeStart + ShadeRange * max(0, -B * 200 * 256) / 65536`: lit only from BELOW, up to
++11) is used instead by one model path, draw class 0x1C (`render_object_with_faces`), which only the island and
+the bridge scenery (5/15, 5/16, scenery table draw class 0x1C) use: for their faces whose byte 59 bit 0 is set or
+whose object has flag 0x2 (the stage bits of byte 59 only mean something to the construction renderer).
+
+**Depth darkening**, then **shade to colour** (all three vertices of a face get the face's shade; Direct3D vertex
+colours). `depth` is the face's first point in camera space, measured from the focus point (0 at the focus,
+negative towards the camera, which sits at -6500, `D` of "Landscape projection"; 256 units a cell):
+```text
+if depth > -3328:  shade = max(1, shade - (depth + 3328) / 256)  # from 12.4 cells in front of the camera on
+if shade < 32:     diffuse = grey(shade * 8),  specular = 0       # 28 -> 224 (88 %), 15 -> 120 (47 %)
+else:              diffuse = white (255),       specular = (253, 185, 53) * min(5*shade - 160, 256) / 256
+```
+The darkening is 13 shades at the focus point and one more per cell beyond it, so the same building is drawn:
+
+| Face | near the bottom of the screen (no darkening) | at the focus point (-13) | 8 cells beyond (-21) |
+|---|---|---|---|
+| turned from the sun (28) | 224, 88 % | 120, 47 % | 56, 22 % |
+| roof or +x/+z wall (36) | 255 + glint (20, 14, 4) | 184, 72 % | 120, 47 % |
+| facing the sun (42) | 255 + glint (49, 36, 10) | 232, 91 % | 168, 66 % |
+
+So up close a face away from the sun is 88 % of its texture colour against 100 % plus an orange-gold glint
+(`0xFDB935`, the colour the other polygon paths pass too); at the usual viewing distance (the focus) it is about
+half against nine tenths, and everything darkens towards the horizon. Never black, except far away. Texture ×
+diffuse + specular is the usual Direct3D modulate (blend states not read). No ambient term, no shadows.
+(Depth arithmetic traced; the table is computed, not measured - a screenshot would confirm it.)
+
+**The hovered object** (`object_to_polygons`; 0x87CACE, the thing under the mouse, while object highlighting is
+on): an enemy or neutral thing, any vehicle, anything at all in two cursor modes (0x89C6E7 = 12 or 13), or another
+tribe's angel of death, is drawn flat - every face the explicit colour grey 200 (78 %) or white, picked by a
+global display byte (0x897987, which also picks between two UI text colours elsewhere). Explicit colours skip the
+sun, the depth darkening and the glint. The player's own buildings and people are not highlighted.
+
+**Untextured faces are not meant to be drawn**: every face with tile 0xFFFF (3047 in bank 0) belongs to an animation
+frame object - the morph key frames (2-4, 8-11, 83-84, 101-106, 108-113), the angel's transition frames 114-116
+and 92-93 (untextured copies of 91, objects.md) - whose points a textured base borrows (for 92-93 and 114-116,
+inferred: they are in no morph record). Were one drawn, it would sample atlas tile 255 at UV 0 (the face's tile
+low byte + 1 = 0 picks the entry just before the tile table), not a palette colour.
+Byte 58 of a face, plus byte 6 of its object, is a draw-order bias: subtracted from the face's depth bucket
+(depth / 16) when it is queued.
+
 ### Scenery looks: plants and prayer heads [exe]
 A scenery thing takes its look from the scenery table (24 bytes a type): a draw class (word +0) and a model or
 sprite (word +0xA), set at creation (0x4A66C0). Model numbers are bank-2 numbers (objects.md "Banks 2-7 index ->
@@ -3457,8 +3549,8 @@ still read from the level and stored, but nothing in the live-measured path uses
 `sunBase`. **Live-measured this session**, two running levels with different on-disk `Inclination` (0x40 and
 0x20, both `ShadeStart`=28/`ShadeRange`=15): `sunX=sunZ=sunBase=147` in both, confirming the constant is
 level-independent in practice. `0x401790` (`sunlight_init_2`) does not set the vector either - it only *reads*
-the already-set `sunX`/`sunZ`/`sunBase` to build two unrelated 1024-entry angle-keyed shade tables (0x89BC8E,
-0x89C08D, still not re-examined). Two other paths exist that could move the vector away from 147, both gated
+the already-set `sunX`/`sunZ`/`sunBase` to build the two 1024-entry shade tables of the 3D models (0x89BC8E,
+0x89C08E: "Object face shading"). Two other paths exist that could move the vector away from 147, both gated
 behind the same flag bit (`0x895DA5 & 0x8`), live-confirmed OFF this session (`Inclination` on both measured
 levels sat unchanged at its on-disk value after 77+ turns, 9+ of the 8-turn checks below):
 - `0x401350`, a per-turn tick: when the turn counter's low 3 bits are all set (every 8th turn), increments
@@ -6670,6 +6762,32 @@ each of the 6 individual bytes tracks beyond `0x89D167` itself (the "a fight inv
 documented above). Worth adding as a real action once the notification system itself is built - see TODO.md
 "Notifications".
 
+## Build panel building buttons [exe]
+The Build tab's 9 buttons come from a fixed exe table (66-byte records at 0x5CC458, in panel order: hut, drum
+tower, warrior, temple, spy, firewarrior, boat hut, airship hut, camp fire; building type at +0x37, box 46 x 52
+at +0x21, first sprite k at +0x25 = `hfx0-0.dat` 1028..1036; draw 0x49D690, per-turn update 0x49DA40). Each
+building has three ready-made 38 x 47 pictures; no light, saturation or tribe remap is applied, and they look
+the same with every level palette:
+
+| Sprite | Look | Drawn when |
+|---|---|---|
+| 1028 + k | dark brown / purple / gold carved picture | available, idle |
+| 1046 + k | bright white and gold | available, hovered or pressed |
+| 1037 + k | all gold, with the "?" (1055) centred over it | discoverable; not clickable |
+
+```text
+state = availability(type)   # 1-3: the player tribe's three building masks (camp fire also needs a game flag)
+                             # else 4 if the type is in the discoverable mask, else 0
+state 0          -> button hidden
+state 1..3       -> 1028+k, or 1046+k while hovered or pressed
+                    (state 3: also sprite 350, a small gold sparkle, on top on every other pair of frames -
+                    0x897981 is the frame counter, so it blinks; what availability 3 means is open)
+state 4          -> 1037+k and the "?" over it (sets the sprite tint flag, whose colour is white unless set just
+                    before: probably no visible tint, unverified)
+```
+The small white icons 1075..1083 are not the panel's: they are the building type table's +0xA sprite, read only
+by the reward icon floating over a vault ("The reward icon over a vault"). Static trace; not yet compared live.
+
 ## Player input: the keymap and HUD clicks [exe]
 Every key press and release, and every mouse-button press and release over the 3D view, goes through one table:
 the keymap. The exe ships a default keymap (188 bindings, a static table) that a saved keys file can override at
@@ -7251,6 +7369,22 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   vehicles and prison are 1.25 × ours and its pyramid 1.17 × ours (1023 high, 4.0 cells, against our 3.41). The
   vault icon's 1072 is in terrain height units (4.19 cells), not model units: in the original it is just over the
   apex, not inside it.
+- ui-and-editor.md "Build tab" / `hud/build.rs` ("Build panel building buttons"): ours draws an available tile as
+  the hover picture 1046+k tinted solid black (white on hover), so the warrior hut shows black; the original draws
+  1028+k untinted (the dark carved picture), 1046+k untinted on hover, and a discoverable building as the gold
+  1037+k with the "?" over it (ours: the "?" alone). `SHADOWS` (1037) is the discoverable look, `ICONS` (1075) the
+  vault reward icons; sprites.md says the same wrongly.
+- objects.md "Records" / client `camera.rs` (one `DirectionalLight` plus `GlobalAmbientLight` 60) and
+  `original_models` ("Object face shading"): the original lights each model face flat, with no ambient and no
+  physical falloff: brightness `shade * 8 / 255` below shade 32 (a face turned from the sun: 28, 88 %), full
+  texture colour at 32 and up plus an additive orange specular `(253, 185, 53) * (5*shade - 160) / 256` (36 for
+  an up-facing roof: +(20, 14, 4); 42 facing the sun: +(49, 36, 10)), the shade being `ShadeStart + ShadeRange *
+  max(0, n . (1,1,1)/√3)` with the level's own `ShadeStart`/`ShadeRange` (28/15), less `(depth + 3328) / 256`
+  past 12.4 cells from the camera (13 at the focus: 47 % / 72 % / 91 % there). Ours shades with PBR, so the side
+  away from the sun drops to nearly black at any distance. The normal is the face's own (flat) one, turned with the building
+  in quarter turns; the sun does not follow the view. objects.md's face byte 0 "palette colour" is wrong: word 0 is
+  the run-time normal code (every face's word 0 equals one of its four codes, untextured faces included), so
+  `Face::colour` is meaningless; harmless, as untextured faces only exist in morph key frames, never drawn.
 - buildings.md "Explosion (drawn)": ours lets every polygon lie where it lands and shrink away, gone after 3 s;
   the original's pieces (one per face, not per polygon pair) vanish on touching the ground with a dust puff and
   sound 0x13, or a splash in water. See "Flying faces (the partial explosion)".
@@ -7521,6 +7655,12 @@ The same exe also contains EA-XA ADPCM (`0x57A2D0` -> `0x57D870` mono / `0x57D9F
   unit id order within a cell; no Ctrl). "Followers panel icons: click, Ctrl + click, Shift + click".
 
 ## Open questions
+- Object face shading ("Object face shading"): `facs` bytes 56..57 (read by no model renderer); what 0x897987
+  (grey vs white hover highlight, also a UI text colour switch) is set by; a screenshot to confirm the darkening
+  table (a building at the focus vs near the bottom of the screen).
+- Build panel buttons ("Build panel building buttons"): what the tribe's third building mask (availability 3,
+  the one that adds the blinking sparkle) stands for; whether the discoverable picture gets a visible tint; not
+  yet seen side by side live.
 - Convert wild ("Convert wild"): the phase of the effect's own 8-turn counter at birth (measured: first try 2
   turns after the cast, twice); `0x450450`'s exact metric (nearest wildman); what `0x4D6660` does when a coast
   wildman in person state 8/3 "walks" (assumed: start moving along its new heading, not confirmed live); the
@@ -7983,9 +8123,15 @@ Addresses are virtual addresses in that build. `.text` 0x401000 is at file offse
 | 0x4BDE94 | tail of a third, whole-map bulk variant of the same `+0xD` computation, run at level load (start address not reverified this session) |
 | 0x401040 | `sunlight_init_default`: sets `ShadeStart`/`ShadeRange`/`Inclination` (0x937AAE/AF/B0) to the exe defaults 28/15/32, and `sunX`/`sunZ`/`sunBase` (0x937AA8/AA/AC) to the literal immediate 0x93 (147) - a flat constant, NOT derived from `ShadeStart`/`ShadeRange`/`Inclination`; live-confirmed on two levels with different on-disk `Inclination` |
 | 0x401090 | near-duplicate of part of `sunlight_init_default`: resets `sunX`/`sunZ`/`sunBase` to the same flat 147 without touching `ShadeStart`/`ShadeRange`/`Inclination`, then falls into `sunlight_init_2` |
-| 0x401790 | `sunlight_init_2`: reads the already-set `sunX`/`sunZ`/`sunBase` (does not set them) to build two unrelated 1024-entry angle-keyed shade tables (0x89BC8E, 0x89C08D) via the sin/cos tables (0x5DDDE8/0x5DE5E8), not re-examined this session |
+| 0x401790 | `sunlight_init_2`: builds the 1024-entry object face shade tables from the sun vector and `ShadeStart`/`ShadeRange`: 0x89BC8E[code] = `ShadeStart + ShadeRange * max(0, sun . dir(code)) / 65536`, 0x89C08E[code] = the same with a light from straight below ("Object face shading") |
 | 0x401350 | per-turn sun-angle tick, gated behind flag `0x895DA5 & 0x8` (live-confirmed OFF in normal play, 2026-10-20): when set and every 8th turn, increments `Inclination` and recomputes `sunX`/`sunBase` from the real sin/cos tables - the exe's actual day/night-style animation, distinct from the level's static sunlight block |
 | 0x401920 | unconditionally forces `Inclination` to 0x40 (64, overwriting the level's value) and `sunX`/`sunBase` (0x937AA8/AC) from two FIXED scalar memory cells (0x5DE9E8/0x5DE1E8) - not an array indexed by `Inclination` (no write to either address found in the exe's code, i.e. build-time data, not level-derived); gated behind the same `0x895DA5 & 0x8` flag as 0x401350 |
+| 0x40CD00 | `calc_normal_maybe`: 10-bit normal code of a triangle, `((pitch+32)/64 & 31) * 32 + ((yaw+32)/64 & 31)` from the cross product of its edges ("Object face shading") |
+| 0x4708D0, 0x471490, 0x471C40 | `object_to_polygons`, `render_object_with_faces`, `object_to_polygons_2`: per frame, write each face's word 0 = its normal code (recomputed if face word 4 bit 0, else `facs` +0x30 code[heading / 512]), shade = table 0x89BC8E[code] (0x89C08E for byte 59 bit 0 / object flag 0x2 in the second), emit its polygons ("Object face shading") |
+| 0x4718C0 | `add_polygon_to_draw_3v_2`: queues a type-6 (model face) polygon by depth; applies the depth fade to the shade, stores it per vertex ("Object face shading") |
+| 0x46C340 | shade to Direct3D vertex colour: below 32 grey `shade*8`, else white plus specular `colour * min(5*shade-160, 256)/256` (inlined the same in `draw_polygons`' type-6 case 0x469947 with colour 0xFDB935) |
+| 0x49D690, 0x49DA40 | Build panel button draw and per-turn update: picks sprite 1028+k / 1046+k (hover) / 1037+k + "?" (discoverable) from availability ("Build panel building buttons") |
+| 0x40AB50, 0x40ABC0 | can the player tribe build this type (1-3 from its three building masks; camp fire also needs a game flag), else 4 if discoverable ("Build panel building buttons") |
 | 0x512A00, 0x512A60 | lava flow (effect 34/state 33) init and per-turn: downhill spread, then fade, then ash ("Volcano lava flow") |
 | 0x5134C0, 0x513570 | lava square (state 38) init and per-turn: a static, decaying hot cell |
 | 0x44DDF0 | `land_level_processing_1`: queues a cell after a height change, flushes to 0x44DF40 at 0x400 queued |

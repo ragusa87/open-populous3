@@ -87,7 +87,7 @@ settled trace - the "not verified against the game" caveat above still stands.
 | 0 | u16 | flags (0x80: morph base, set at load from the morph file, below) |
 | 2 | u16 | face count |
 | 4 | u16 | point count |
-| 6 | u8 | unknown |
+| 6 | i8 | draw-order bias of all its faces (with face byte 58) |
 | 7 | u8 | animation record index (morph record of a morph base, set at load) |
 | 8 | | unknown |
 | 12 | u32 | drawing scale: a point is `scale / 65536` cells on each axis (160 for most buildings, 150 for the pyramid, pop3-rev-analysis.md "Model size") |
@@ -124,13 +124,15 @@ frame count byte; as shipped it holds two zero-terminated lists (107 107 102 103
 
 | Off | Type | Content |
 |---|---|---|
-| 0 | u8 | palette colour (flat faces) |
+| 0 | u16 | not a colour: the face's normal code, written by the exe every frame from 48..55 (in the file, one of those four codes) |
 | 2 | u16 | atlas tile, `0xffff` = untextured |
 | 6 | u8 | point count (3 or 4; others skipped) |
 | 7 | u8 | flags: `0x20` = blended (`FACE_ALPHA`, see below); 0, 3, 6, 7 elsewhere, meaning unknown |
 | 8 | 4 x (i32 u, i32 v) | texel inside the tile, 16.16 fixed point, 0..32 |
 | 40 | 4 x u16 | point indices, 0-based within the object |
-| 48..58 | | per-point shade (?), unknown |
+| 48 | 4 x u16 | the face's normal, a 10-bit code (`pitch_step * 32 + yaw_step`, 64ths of a turn), one per heading quarter: the light (pop3-rev-analysis.md "Object face shading") |
+| 56 | u16 | unknown, not read by the shading |
+| 58 | i8 | draw-order bias, added to the object's byte 6 and subtracted from the face's depth bucket (pop3-rev-analysis.md "Object face shading") |
 | 59 | u8 | construction stages: bit `s` (0-3) = drawn at stage `s`, bit `4 + s` = drawn as plain wood (tile 250) at that stage; 0 = only once built (pop3-rev-analysis.md "Drawing a building by stage") |
 
 Faces are one-sided: a face is seen only from its front, where its points turn counter-clockwise (x, y up, z

@@ -103,10 +103,12 @@ teal, in unit model order: brave, warrior, preacher, spy, firewarrior, shaman, `
 people), 676-681 the panel's tab icons, each then highlighted: 676 build (a house), 678 spells, 680 stats (three
 people, also `catalog::PEOPLE_ICON`), 682 the Magical Shield's icon, 346-349 the volcano's rock, a boulder in 4 orientations (17 x 13) [exe], 354-371 spell icons in purple (the hovered look?), 372-389 spell icons, 390-407 the same lighter, 408-419 colour
 variants of the shield's closed fist, but 411-413 and 415 the bloodlust's skull,
-1028-1083 spell and building glyphs (seen in the game: 1028-1036 coloured building pictures, a bit pink, 1037-1045 the building
-icons' shadows and 1046-1054 their highlights, 1055 the "?" of something to discover (1056 the same, smaller),
+1028-1083 spell and building glyphs (1028-1036 the Build panel's building pictures, dark carved, 1037-1045 the same
+all gold (a discoverable building, under the "?") and 1046-1054 bright white and gold (hovered), pop3-rev-analysis.md
+"Build panel building buttons", 1055 the "?" of something to discover (1056 the same, smaller),
 1057-1074 the panel's spell icons, white, drawn dark: Armageddon 1057, models 2-17 in order from 1058 (Blast; Angel
-of Death 1069), Teleport 1074; 1075-1083 the panel's building icons, white, drawn dark, in the cursor's order: hut,
+of Death 1069), Teleport 1074; 1075-1083 white building icons, the building type table's own, drawn only as the reward icon over a
+vault (not the panel's), in type order: hut,
 drum tower 1076, warrior, firewarrior, temple, spy, boat hut, airship hut, camp fire), 1084-1088 the Stats
 tab's row labels (selected, idle, in a house, working, in a balloon; in a boat: 655), 1090-1600 spell effects (dust, explosions, swarm...).
 The 3D objects have no wood pile: objects 0 and 12 are a camp fire (logs and a flame board), see objects.md.

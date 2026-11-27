@@ -661,7 +661,11 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [ ] Building debris (client `explosion.rs`, pop3-rev-analysis.md "Flying faces (the partial explosion)"): a piece is gone the moment it lands (done); left: its dust puff and sound 0x13 there (a splash in water).
 - [x] Construction and damage look for original objects (pop3-rev-analysis.md "Drawing a building by stage"): each face drawn by its stage byte (`Face::at_stage`, `staged_object_mesh`), the frame in tile 250; the generated kit keeps its own frame (decided).
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
-- [ ] Build tab: icons, discoveries unlocking "?".
+- [ ] Build tab: icons, discoveries unlocking "?". Icons as the original (pop3-rev-analysis.md "Build panel
+  building buttons"): an available tile draws `hfx0-0.dat` 1028+k untinted (the dark carved picture), 1046+k when
+  hovered or pressed; a discoverable one the gold 1037+k with the "?" (1055) over it, not the "?" alone. Ours
+  (`hud/build.rs`) tints 1046+k black, which is why the warrior hut's icon is black. `SHADOWS`/`ICONS` are
+  misnamed (1037+k is the discoverable look, 1075+k the vault reward icons).
 - [ ] Blueprint: tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects.
 - [ ] Construction pace: **the overall shape is now known and is NOT a per-worker timer** (pop3-rev-analysis.md "Building construction and wear"): the original drives the building's 0-4 visual stage directly from a wood-stock counter against a per-type total cost (300/900/1100/800/200/500/1100 wood by kind, exe-confirmed) via `stage = clamp((stock*4-1)/(cost-1), 0, 3)`, not a fixed jump-then-build animation length. The assigned-brave wood-fetch throttle is now concrete too: at most half of a site's currently-assigned braves (rounded down, minimum one), minus however many are already out fetching, are ever recruited to fetch wood at once, clamped to how much is still needed - a separate "plan" controller per site (not the enforcement point for "each kind has only a maximum", which is elsewhere), and not on a recurring 16-tick cycle (that rhythm belongs to a different function, the huts' growth-check cadence, not this controller - see "Huts: breeding and growth"). Our own `work.rs` throttle ("at most needed - delivered braves are out at once") is a different rule than this and could be brought in line with it, not yet done. Still open: `JUMP_TICKS`/`BUILD_TICKS`/`JUMP_STEP` as literal per-worker durations likely don't correspond to anything in the original at all; how a dropped wood pile next to a site actually becomes stock progress (the final delivery hop) was not resolved and needs a live memory check, not further static search. Whether braves gather and watch first before flattening is untouched by this pass, still open.
 - [ ] Walls: replan only walkers whose route crosses a changed wall (every walker replans today); a boat hut's jetty side stays open to boats, to check with vehicles.
@@ -1872,10 +1876,17 @@ Level/world correctness that is mostly stable already (terrain especially: exten
 - [ ] Level names instead of the header's "Level N": `pop3_format::language` reads the texts ([language.md](docs/specs/language.md)); find which text number names each level (open there), find the install's `language/` dir like `data/`, pick the language (a setting, English by default).
 - [ ] Our own texts in Fluent (`assets/lang/<lang>.ftl`, named keys), a key -> original text number table, lookup from `langNN.dat` with the original files and from our `.ftl` otherwise ([language.md](docs/specs/language.md) "Our texts and the fallback"); when the game first shows translatable text.
 - [ ] Sunlight block (ShadeStart 28, ShadeRange 15, Inclination 32/64): find whether it drives the terrain lighting. `LandBlocks` / `LandOrients` are identical stale data: ignore them.
-- [ ] Object shading, **question for a spec session**: how the original lights a building's (any object's) faces.
-  What the per-point bytes 48..58 of a face hold (objects.md "Records": "per-point shade (?)"), whether the light
-  is fixed in the world or follows the view, and how dark a face turned away from it gets (a `fade` row?). Ours:
-  one fixed sun (`camera.rs`, the terrain's) plus a weak ambient, so seen against the sun a building is almost black.
+- [ ] Object shading as the original (pop3-rev-analysis.md "Object face shading"): one flat shade per face, from
+  the face's own normal (`facs` bytes 48..55: a 10-bit pitch/yaw code per heading quarter) against a sun fixed in
+  the world (not the view), `shade = ShadeStart + ShadeRange * max(0, n . (1,1,1)/√3)` with the level's
+  `ShadeStart`/`ShadeRange` (28/15: 28 turned away, 36 roof, 42 facing the sun). Below 32 the face is its texture
+  × `shade * 8 / 255` (88 % at 28, never darker), from 32 full texture colour plus an additive orange specular
+  `(253, 185, 53) * (5*shade - 160) / 256`. Then distance: from 12.4 cells in front of the camera the shade
+  drops one step per cell (13 at the focus point: 47 % / 72 % / 91 %). No ambient, no PBR falloff, no shadows.
+  Ours (`camera.rs` `DirectionalLight` + ambient 60, PBR) leaves the side away from the sun almost black at any
+  distance. The hovered enemy/neutral thing or vehicle is drawn flat grey 200 (or white), unlit. Face word 0 is
+  not a colour (objects.md "Records"); `Face::colour` only matters for untextured faces, which are animation
+  frames never drawn.
 
 ## Priority 4 — presentation and UX polish
 Additive and mostly independent of the tiers above: chip away at these alongside anything else.
