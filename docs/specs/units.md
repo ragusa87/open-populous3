@@ -260,11 +260,12 @@ targets. Explicit orders still go by the real tribe: a player can always attack 
   at once and restarts the full countdown; disguising as its own tribe drops it.
 - The player clicks one of the other tribes' squares under the mana strip, shown while a spy is selected (theirs
   skipped, in tribe order: shortcuts.md).
-- Colours (`Unit::shown_owner`): its owner sees it blink between its real and disguise colour every 2 turns while
-  it settles, then the disguise; every other tribe sees its real colour until it settles, then the disguise.
-- Look (`Unit::shown_kind`): once settled every other tribe sees a brave (its art, poses and idle flavor), its
-  owner still a spy; while settling, or undisguised, a spy for all. (The original: every other tribe always sees a
-  brave, disguised or not - TODO.md "Spies".)
+- Colours (`Unit::shown_owner`), in the 3D view the same for every viewer: blinking between its real and
+  disguise colour every 2 turns while it settles, then the disguise (the original's minimap alone shows other
+  tribes its real colour until it settles; we have no minimap yet).
+- Look (`Unit::shown_kind`): every other tribe always sees a plain brave (its art, poses and idle flavor), disguised
+  or not, settling or not, setting fire included (anim 17 without the outfit); its owner sees its spy
+  (pop3-rev-analysis.md "Spy disguise and infiltration", "Look").
 
 **Reveal** (`Unit::reveal`), and nothing else ends a disguise:
 - an attack order aimed at it, the turn the attack starts (`GameMap::go_attack`, spotting's own too);

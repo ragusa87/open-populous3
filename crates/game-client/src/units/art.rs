@@ -551,8 +551,8 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Shoved => PersonAnim::Shoved,
                 Pose::Hack => PersonAnim::Chop,
                 Pose::Throw => PersonAnim::Throw,
-                // Only the spy's and the firewarrior's outfits have it (animations.md 17).
-                Pose::SetFire if matches!(kind, UnitKind::Spy | UnitKind::Firewarrior) => PersonAnim::SetFire,
+                // Anim 17 (animations.md): the spy's outfit, or plain for a spy other tribes see as a brave.
+                Pose::SetFire if matches!(kind, UnitKind::Spy | UnitKind::Firewarrior | UnitKind::Brave) => PersonAnim::SetFire,
                 Pose::SetFire => PersonAnim::Throw,
                 Pose::Pedal => PersonAnim::Pedal,
                 Pose::Listen => PersonAnim::Listen,

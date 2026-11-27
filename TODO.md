@@ -258,11 +258,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   discovery sweep's radius~~ RESOLVED 2026-11-27 ("What un-disguises a spy"): the 3x3 cells around the caught
   spy (radius 1, not 3), and only spies standing inside the AI tribe's settlement area (a disc of 10 cells
   around each of its buildings, 4/6/8 with `SET_DEFENCE_RADIUS` 5/7/9) are rolled for - `ai_spy.rs` checks
-  everywhere: fix both; ~~whether a settled spy is drawn as a brave~~ RESOLVED
-  2026-11-27 ("Spy disguise and infiltration", "Look"): every spy is drawn as a plain brave to every tribe but
-  its own, ALWAYS - disguised or not, settling or not, arson pose included (anim 17 plain); its owner sees the
-  spy outfit - drop the "once settled" condition from `Unit::shown_kind`; and in the 3D view every viewer sees
-  the settling blink (only the minimap shows others the real colour until settled) - adjust `Unit::shown_owner`; the
+  everywhere: fix both; the
   original's own reveal cursor sprite (ours: a generated punch badge); the throw sound (0x36, no sound events yet).
 - [x] Spies (implemented: `disguise.rs`, `arson.rs`, `ai_spy.rs`, client `units/spy.rs`, `hud/disguise.rs`; the
   delay is simply 63 of our ticks, one per original turn): disguise is one packed byte per spy (apparent tribe + a transition countdown, `SPY_DISGUISE_DELAY`

@@ -51,23 +51,22 @@ impl Unit {
         self.statuses.disguise.is_some_and(|d| d.settled() && Owner::Tribe(d.apparent) != self.owner)
     }
 
-    /// The colour `viewer` sees it in at `now`: its owner sees it blink between its real and apparent tribe every
-    /// 2 turns while settling, then the disguise; everyone else its real tribe until it settles, then the disguise.
-    pub fn shown_owner(&self, viewer: TribeId, now: Tick) -> Owner {
+    /// The colour it is drawn in at `now` in the 3D view, to every viewer alike: blinking between its real and
+    /// apparent tribe every 2 turns while settling, then the disguise ("Spy disguise and infiltration" [exe]; the
+    /// original's minimap alone shows other tribes its real colour until it settles).
+    pub fn shown_owner(&self, now: Tick) -> Owner {
         let Some(d) = self.statuses.disguise else { return self.owner };
-        if d.settled() {
-            Owner::Tribe(d.apparent)
-        } else if self.owner == Owner::Tribe(viewer) && now.to_wire() & 2 != 0 {
+        if d.settled() || now.to_wire() & 2 != 0 {
             Owner::Tribe(d.apparent)
         } else {
             self.owner
         }
     }
 
-    /// The kind `viewer` sees it as: a settled disguise passes as a brave to everyone but its owner, who still sees
-    /// its spy.
+    /// The kind `viewer` sees it as: a spy is always a plain brave to every tribe but its own, disguised or not,
+    /// settling or not ("Spy disguise and infiltration", "Look" [exe]); its owner sees its spy.
     pub fn shown_kind(&self, viewer: TribeId) -> UnitKind {
-        if self.disguised() && self.owner != Owner::Tribe(viewer) { UnitKind::Brave } else { self.kind }
+        if self.kind == UnitKind::Spy && self.owner != Owner::Tribe(viewer) { UnitKind::Brave } else { self.kind }
     }
 
     /// Takes on `tribe`'s look: re-arms the full settling countdown, even switching from another disguise.
@@ -161,7 +160,7 @@ mod tests {
         settle(&mut u);
         u.disguise_as(TribeId::Green, DISGUISE_DELAY);
         assert!(!u.counts_as(TribeId::Red) && !u.counts_as(TribeId::Green), "its real tribe again");
-        assert_eq!(u.shown_owner(TribeId::Red, Tick::ZERO), Owner::Tribe(TribeId::Blue));
+        assert_eq!(u.shown_owner(Tick::ZERO), Owner::Tribe(TribeId::Blue));
         settle(&mut u);
         assert!(u.counts_as(TribeId::Green) && !u.counts_as(TribeId::Red));
     }
@@ -178,30 +177,27 @@ mod tests {
     }
 
     #[test]
-    fn the_owner_sees_it_blink_while_settling_others_a_hard_cut() {
+    fn it_blinks_while_settling_then_shows_the_disguise() {
         let mut u = spy();
-        u.disguise_as(TribeId::Red, DISGUISE_DELAY);
-        let seen = |u: &Unit, viewer| (0..4).map(|n| u.shown_owner(viewer, Tick::from_wire(n))).collect::<Vec<_>>();
+        let seen = |u: &Unit| (0..4).map(|n| u.shown_owner(Tick::from_wire(n))).collect::<Vec<_>>();
         let (blue, red) = (Owner::Tribe(TribeId::Blue), Owner::Tribe(TribeId::Red));
-        assert_eq!(seen(&u, TribeId::Blue), [blue, blue, red, red]);
-        assert_eq!(seen(&u, TribeId::Green), [blue; 4]);
+        assert_eq!(seen(&u), [blue; 4], "undisguised");
+        u.disguise_as(TribeId::Red, DISGUISE_DELAY);
+        assert_eq!(seen(&u), [blue, blue, red, red]);
         settle(&mut u);
-        assert_eq!(seen(&u, TribeId::Blue), [red; 4]);
-        assert_eq!(seen(&u, TribeId::Green), [red; 4]);
+        assert_eq!(seen(&u), [red; 4]);
     }
 
     #[test]
-    fn a_settled_disguise_looks_like_a_brave_to_all_but_its_owner() {
+    fn a_spy_always_looks_like_a_brave_to_all_but_its_owner() {
         let mut u = spy();
-        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Spy, "undisguised");
+        assert_eq!((u.shown_kind(TribeId::Blue), u.shown_kind(TribeId::Red)), (UnitKind::Spy, UnitKind::Brave), "undisguised");
         u.disguise_as(TribeId::Red, DISGUISE_DELAY);
-        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Spy, "still settling");
+        assert_eq!(u.shown_kind(TribeId::Green), UnitKind::Brave, "settling");
         settle(&mut u);
-        assert_eq!(u.shown_kind(TribeId::Blue), UnitKind::Spy);
-        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Brave);
-        assert_eq!(u.shown_kind(TribeId::Green), UnitKind::Brave);
-        u.reveal();
-        assert_eq!(u.shown_kind(TribeId::Red), UnitKind::Spy);
+        assert_eq!((u.shown_kind(TribeId::Blue), u.shown_kind(TribeId::Red)), (UnitKind::Spy, UnitKind::Brave));
+        let warrior = Unit::new(UnitId::from_raw(3), TribeId::Blue, UnitKind::Warrior, (0, 0));
+        assert_eq!(warrior.shown_kind(TribeId::Red), UnitKind::Warrior);
     }
 
     #[test]

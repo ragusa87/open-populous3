@@ -259,7 +259,7 @@ impl UnitSprites {
         }
         let kind = UnitKind::ALL.iter().position(|&k| k == shown)?;
         // Wildmen have no tribe (`Owner::Wild`): one look for all. A disguised spy wears the look the player sees.
-        let tribe = unit.shown_owner(PLAYER, now.tick).tribe().map_or(0, TribeId::as_usize);
+        let tribe = unit.shown_owner(now.tick).tribe().map_or(0, TribeId::as_usize);
         let frames = self.kinds.get(kind)?.get(tribe)?.get(pose as usize)?.get(art::shown_dir(&unit.action, facing, yaw))?;
         let bored = matches!(pose, Pose::Scratch | Pose::Pushup | Pose::Juggle).then(|| art::bored(shown, unit.id, now.tick)).flatten();
         let frame = match bored {
