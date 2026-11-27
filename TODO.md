@@ -504,7 +504,6 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   `train_cost` already has). Replaces the old fixed `mana::INCOME` placeholder, which made every spell charge in
   a single income tick regardless of population - checked live: a lone shaman now takes Blast (4 charges, cost 40)
   about 11 s, not instantly.
-- [ ] Delayed reservoir: done (`mana::Reservoir`, spells.md "Mana"), the shaman killer's share goes through it. Traced (pop3-rev-analysis.md "Reservoir"): the 50-turn wait (instead of 1000) is for multiplayer games, the original's flag being set when a game starts from the network lobby and cleared when it is left; give `Reservoir` that delay when the game is a multiplayer one (`multiplayer.md`). Mana discoveries (kind 6) also go through the reservoir with their amount, when the 82-turn reward countdown ends (ours: through `add`); nothing else does, no totem gift.
 - [x] Shaman-death mana dispatch done for the loss side (`GameMap::shaman_died`, spells.md "Mana"): the tribe
   loses `base * SHAMEN_DEAD_MANA_PCT_LOST` (25 %, file and exe agree; `base` = bank only - the file's own "needed
   + stored building mana" alternative for a human/controller-type-2 tribe is still the same unmodelled-controller

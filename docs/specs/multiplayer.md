@@ -24,6 +24,8 @@ Input never touches the map: the client issues commands to its `GameSchedule` (`
 - A building plan and the orders sent with it go on the same tick: `GameMap::place_orders` gives the orders the
   plan will get once placed (`build_orders` needs it on the map).
 - Dev shots (`dev.rs`) still apply their set-up commands to the map directly.
+- A multiplayer game sets `GameMap::multiplayer` at its start (the original's multiplayer game flag): the mana
+  reservoir then waits 50 turns, not 1000 (spells.md "Mana"). Not yet set by anything: no host/join flow.
 - Desync check: `GameMap::checksum` (`checksum.rs`), a stable FNV-1a 64 hash of the tick, the random draw, the
   heightmap and every unit (id, owner, kind, facing, position, health, action), sent as `Message::Checksum` now
   and then; a different hash for the same tick is a desync. Not yet sent by anything (no network driver).

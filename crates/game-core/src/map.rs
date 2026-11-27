@@ -126,6 +126,9 @@ pub struct GameMap {
     next_id: u32,
     /// The game's random draws while it runs (effects), the same on every peer: seeded per game (`seeded`).
     pub rng: Lcg,
+    /// A multiplayer game (the original's flag set when a game starts from the network lobby): the mana reservoir
+    /// waits 50 turns instead of 1000 (`mana::reservoir_delay`). Set by the game's start, false otherwise.
+    pub multiplayer: bool,
     /// Each computer tribe's own script (`ai_script.rs`), one per tribe with a `cpscrNNN.dat` assigned
     /// (`LevelHeader::ai_scripts`); empty on generated maps and sandboxes.
     pub(crate) tribe_scripts: Vec<crate::ai_script::TribeScript>,
@@ -190,7 +193,7 @@ impl GameMap {
     pub(crate) fn bare(name: impl Into<String>, terrain: Heightmap, sites: Vec<ReincarnationSite>) -> Self {
         let tribes = Tribes::from_sites(&sites);
         let shading = CellShading::new(terrain.size(), SunParams::default());
-        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, fog: None, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
+        GameMap { name: name.into(), theme: None, terrain, sites, tribes, units: Vec::new(), trees: Vec::new(), buildings: Vec::new(), granted: Vec::new(), totems: Vec::new(), wood: Vec::new(), mana: per_player(ManaPool::default()), spell_books: per_player(SpellBook::demo()), build_books: per_player(BuildBook::all(BuildAvailability::Available)), campfires: Vec::new(), walls: Walls::default(), start_camera: Some(OUR_MAPS_CAMERA), markers: None, object_bank: 0, shaman_omni: false, fog: None, effects: Registry::default(), debris: Registry::default(), coordinators: Coordinators::default(), formations: Vec::new(), bolts: Registry::default(), fireballs: Registry::default(), site_shots: Registry::default(), vehicles: Registry::default(), patrol_points: Registry::default(), hidden_points: Registry::default(), ashes: Default::default(), shading, outcome: None, melee_wins: [0; TRIBES], melee_deaths: [0; TRIBES], fires_put_out: [0; TRIBES], kills: [[0; TRIBES]; TRIBES], now: Tick::ZERO, next_id: 1, rng: Lcg(0), multiplayer: false, tribe_scripts: Vec::new(), ai: Vec::new(), active_flyby: None, user_inputs_disabled: false, balance: crate::balance::Balance::ours() }
     }
 
     /// `bare`, with the sandboxes' spells for every player.
@@ -252,6 +255,7 @@ impl GameMap {
             now: Tick::ZERO,
             next_id: 1,
             rng: Lcg(0),
+            multiplayer: false,
             tribe_scripts: Vec::new(),
             ai: Vec::new(),
             active_flyby: None,
@@ -1133,7 +1137,7 @@ impl GameMap {
             && gain > crate::mana::Mana::ZERO
             && let Some(pool) = self.mana.get_mut(killer.as_usize())
         {
-            pool.give_delayed(gain);
+            pool.give_delayed(gain, crate::mana::reservoir_delay(self.multiplayer));
         }
     }
 

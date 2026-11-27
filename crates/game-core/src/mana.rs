@@ -65,8 +65,15 @@ pub struct ManaPool {
 
 /// `give_mana_delayed`'s wait (pop3-rev-analysis.md "Reservoir"): 1000 turns before any of it is released.
 pub const RESERVOIR_DELAY: Ticks = Ticks::new(1000);
+/// The same wait in a multiplayer game (the original's multiplayer game flag, "Reservoir").
+pub const RESERVOIR_DELAY_MULTIPLAYER: Ticks = Ticks::new(50);
 
-/// Delayed mana (pop3-rev-analysis.md "Reservoir"): `held` waits `RESERVOIR_DELAY` after the last gift, then
+/// The reservoir's wait in a game that is (or is not) a multiplayer one.
+pub fn reservoir_delay(multiplayer: bool) -> Ticks {
+    if multiplayer { RESERVOIR_DELAY_MULTIPLAYER } else { RESERVOIR_DELAY }
+}
+
+/// Delayed mana (pop3-rev-analysis.md "Reservoir"): `held` waits `delay` (`reservoir_delay`) after the last gift, then
 /// flows out at a `rate` fixed when the release starts (`release_rate`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Reservoir {
@@ -76,10 +83,10 @@ pub struct Reservoir {
 }
 
 impl Reservoir {
-    /// A gift: added to what is held, and the wait starts over.
-    pub fn give(&mut self, amount: Mana) {
+    /// A gift: added to what is held, and the wait of `delay` starts over.
+    pub fn give(&mut self, amount: Mana, delay: Ticks) {
         self.held += amount;
-        self.wait = Some(Countdown::new(RESERVOIR_DELAY));
+        self.wait = Some(Countdown::new(delay));
         self.rate = Mana::ZERO;
     }
 
@@ -125,8 +132,8 @@ impl ManaPool {
     }
 
     /// `give_mana_delayed`: mana that reaches `incoming` only once the reservoir releases it (`Reservoir`).
-    pub fn give_delayed(&mut self, amount: Mana) {
-        self.reservoir.give(amount);
+    pub fn give_delayed(&mut self, amount: Mana, delay: Ticks) {
+        self.reservoir.give(amount, delay);
     }
 
     /// The turn's update ("Every turn, per tribe"): `income` (`GameMap::mana_income`, huts-and-training.md
@@ -320,7 +327,7 @@ mod tests {
     #[test]
     fn delayed_mana_waits_then_flows_at_its_starting_rate() {
         let mut r = Reservoir::default();
-        r.give(Mana(2400));
+        r.give(Mana(2400), RESERVOIR_DELAY);
         for _ in 1..RESERVOIR_DELAY.get() {
             assert_eq!(r.release(), Mana::ZERO);
         }
@@ -331,20 +338,29 @@ mod tests {
     }
 
     #[test]
+    fn a_multiplayer_game_waits_50_turns() {
+        let mut r = Reservoir::default();
+        r.give(Mana(2400), reservoir_delay(true));
+        assert!((1..50).all(|_| r.release() == Mana::ZERO));
+        assert_eq!(r.release(), Mana(100));
+        assert_eq!(reservoir_delay(false), RESERVOIR_DELAY);
+    }
+
+    #[test]
     fn another_gift_restarts_the_wait() {
         let mut r = Reservoir::default();
-        r.give(Mana(2400));
+        r.give(Mana(2400), RESERVOIR_DELAY);
         for _ in 0..RESERVOIR_DELAY.get() {
             r.release();
         }
-        r.give(Mana(100));
+        r.give(Mana(100), RESERVOIR_DELAY);
         assert_eq!((r.release(), r.held), (Mana::ZERO, Mana(2400)), "held again, 100 of the first already out");
     }
 
     #[test]
     fn released_mana_is_distributed_like_any_other() {
         let mut pool = ManaPool { bank: Mana::ZERO, ..ManaPool::default() };
-        pool.give_delayed(Mana(240));
+        pool.give_delayed(Mana(240), RESERVOIR_DELAY);
         let mut now = Tick::ZERO;
         for _ in 0..RESERVOIR_DELAY.get() {
             now = now.next();

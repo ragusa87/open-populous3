@@ -208,8 +208,9 @@ impl GameMap {
                 }
             }
             Reward::Mana(n) => {
+                let delay = crate::mana::reservoir_delay(self.multiplayer);
                 if let Some(pool) = self.mana.get_mut(i) {
-                    pool.add(Mana(n));
+                    pool.give_delayed(Mana(n), delay);
                 }
             }
             Reward::RevealFog { cell } => {
@@ -272,7 +273,7 @@ mod tests {
         map.give(TribeId::Red, Reward::Mana(500));
         let volcano = |p: usize| map.spell_books[p].slot(SpellKind::Volcano).unwrap().availability;
         assert_eq!((volcano(0), volcano(1)), (Availability::Provided { shots: 1 }, Availability::Known));
-        assert_eq!((map.mana[0].incoming, map.mana[1].incoming), (Mana::ZERO, Mana(500)));
+        assert_eq!((map.mana[0].reservoir.held, map.mana[1].reservoir.held), (Mana::ZERO, Mana(500)), "through the reservoir");
     }
 
     fn sandbox() -> (GameMap, usize, UnitId) {

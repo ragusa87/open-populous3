@@ -223,11 +223,11 @@ Per player (`GameMap::mana`, by owner): `ManaPool { bank, incoming, received, us
 `received` is the last income, `used` what went into spells since then. Starts at `START_MANA`.
 
 Delayed mana (`give_delayed`, `mana::Reservoir`, pop3-rev-analysis.md "Reservoir"): each gift adds to `held` and
-restarts a `RESERVOIR_DELAY` (1000 turns) wait; once it ends, `held` flows into `incoming` every turn at a rate
-fixed from the amount left when the release starts (`release_rate`: amount / 24, at least 1, below 36 000; 1500 up
-to 361 500; amount / 240 above). The original's 50-turn wait in multiplayer games is not modelled. Only the
-shaman-death share uses it so far; the original also sends mana discoveries (kind 6) through it, and nothing else
-(ours: discoveries go through `add`). See pop3-rev-analysis.md "Reservoir".
+restarts a wait of 1000 turns (`RESERVOIR_DELAY`), 50 in a multiplayer game (`GameMap::multiplayer`,
+`reservoir_delay`); once it ends, `held` flows into `incoming` every turn at a rate fixed from the amount left
+when the release starts (`release_rate`: amount / 24, at least 1, below 36 000; 1500 up to 361 500; amount / 240
+above). Two gifts go through it, as in the original: the shaman killer's share and a mana discovery
+(`Reward::Mana`); nothing else. See pop3-rev-analysis.md "Reservoir".
 
 Shaman death (`GameMap::shaman_died`, pop3-rev-analysis.md "Shaman death"): caught at the end of whatever tick
 kills her (melee, a spell, drowning, stranded, lava...) by comparing alive-before/alive-after, since `Unit::die`
