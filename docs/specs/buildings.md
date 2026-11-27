@@ -73,21 +73,20 @@ normal over 1 cell either side, slopes and the planet's curve, so no side sinks 
 By stage (`Building::stage`, client `construction.rs`):
 - Blueprint: the same white mark as the Build tab's blueprint (`blueprint::mark_mesh`), draped on the ground and
   redrawn every frame, no model.
-- Under construction and dismantling: the wooden structure, the model's face edges as square brown beams
-  (`object_edges` + `beams` for original objects; the generated kit has a separate authored timber scaffold;
-  the unknown-ID box: corner posts and a ring per piece of wood), with the built part of
-  the real model inside it (`built_part`: its triangles sorted by height, the lowest `used / wood_cost` of them;
-  the unknown-ID box is stacked in one layer per piece). So it fills from the ground up, one band per piece.
-  Generated material colours and texture UVs survive the triangle selection; timber frames share the atlas.
-  Its faces show their outer side as usual and their inner side in the plain tribe colour, so the inside of the
-  building is not seen through the structure. The inner side is drawn from a copy pushed 0.006 cells along each
-  face's normal (`pushed`): where the model has two faces back to back on one plane, it stays behind the textured
-  one instead of flickering with it. Part-by-part assembly is still future work.
-  The original works differently [exe, measured] (pop3-rev-analysis.md "Drawing a building by stage"): no beams
-  from edges and no height cut. The building's own mesh is drawn with the faces its per-face stage byte (objects.md
-  `facs` byte 59) allows at the current stage (0-3, from wood stock / cost), some of them in plain dark wood
-  (atlas tile 250): the wooden frame is the model's own posts and beams in wood, which later stages replace with
-  their real texture and fill in with walls, then the roof once built.
+- Under construction, dismantling or damaged, an original model as the original draws it [exe, measured]
+  (pop3-rev-analysis.md "Drawing a building by stage"; `original_models::staged_object_mesh`): no beams from edges
+  and no height cut. Its stage (0-3, `construction::construction_stage`: `(stock × 4 - 1) / (cost - 1)` in wood,
+  a hut 0, 1, 2) picks the faces its per-face stage byte (objects.md `facs` byte 59, `Face::at_stage`) shows then,
+  some of them in plain wood: atlas tile 250 over the whole face, a wooden border round a see-through middle, so
+  such a face is drawn as the beams along its edges. Later stages give those faces their own texture and add the
+  walls, then the roof once built. Their inner side is drawn in the model's own textures (a copy pushed 0.006
+  cells along each face's normal, `pushed`, so two faces back to back on one plane do not flicker).
+- Under construction and dismantling, the generated kit and the unknown-ID box (ours, kept): the generated kit's
+  authored timber scaffold (the box: corner posts and a ring per piece of wood) with the built part of the model
+  inside it (`built_part`: its triangles sorted by height, the lowest `used / wood_cost` of them; the box stacked
+  in one layer per piece), so it fills from the ground up, one band per piece, its inner side in the plain tribe
+  colour so the inside is not seen through the structure. Generated material colours and texture UVs survive the
+  triangle selection; timber frames share the atlas.
 - Built: the whole model.
 - Attacked (`shaking` > 0, someone inside damaging it): the model (not the structure) rocks about its base, the
   walls move and the base stays: a blow every 0.7 s tilts it by up to 0.012 rad, a quick wobble dying out before

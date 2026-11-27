@@ -544,7 +544,7 @@ mod tests {
     #[test]
     fn a_posed_frame_has_the_base_faces_and_points_between_two_keys() {
         let mut bank = ObjectBank { objects: vec![Object::default(); 117] };
-        let face = pop3_format::Face { tile: Some(1), colour: 0, points: vec![0, 1, 2], uv: vec![(0, 0); 3], flags: 0 };
+        let face = pop3_format::Face { tile: Some(1), colour: 0, points: vec![0, 1, 2], uv: vec![(0, 0); 3], flags: 0, stages: 0 };
         bank.objects[100] = Object { points: vec![[0; 3]; 3], faces: vec![face.clone()], scale: 0 };
         bank.objects[101] = obj(vec![[0, 0, 0], [10, 0, 0], [0, 10, 0]]);
         bank.objects[102] = obj(vec![[0, 0, 0], [20, 0, 0], [0, 30, 0]]);

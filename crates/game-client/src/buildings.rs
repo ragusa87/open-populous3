@@ -12,11 +12,11 @@
 use crate::blueprint::{mark_material, mark_mesh, set_mark};
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::game_frame::GameYaw;
-use crate::construction::{beams, box_frame, built_part, chimney, layered_box, object_edges, pushed, BEAM, INNER_GAP};
+use crate::construction::{beams, box_frame, built_part, chimney, construction_stage, layered_box, pushed, BEAM, INNER_GAP};
 use crate::flame::{self, Flame, FlameFrames};
 use crate::generated_buildings;
 use crate::grounded::{ground_point, Grounded, Tilted};
-use crate::original_models::{atlas_image, object_mesh, solid_part, to_mesh, MeshData, OriginalObjects};
+use crate::original_models::{atlas_image, object_mesh, solid_part, staged_object_mesh, to_mesh, MeshData, OriginalObjects};
 use crate::sim_time::{seed, SimNow};
 use crate::sites::tribe_color;
 use crate::world::{CurrentMap, LevelList};
@@ -250,6 +250,20 @@ fn staged(full: &MeshData, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) 
     Staged { shown: Some(meshes.add(to_mesh(part))), inner: Some(inner), frame: None, top }
 }
 
+/// An original building's meshes (`Staged`): built, its whole model; under construction or damaged, the faces its
+/// stage shows (`staged_object_mesh`, the frame among them in plain wood) and their inner side, no beams.
+fn original_staged(solid: &pop3_format::Object, tribe: TribeId, pieces: Option<(u8, u8)>, meshes: &mut Assets<Mesh>) -> Staged {
+    let full = object_mesh(solid, tribe);
+    let Some((used, of)) = pieces else { return staged(&full, None, meshes) };
+    let part = staged_object_mesh(solid, tribe, construction_stage(used, of));
+    let top = chimney(&full);
+    if part.indices.is_empty() {
+        return Staged { shown: None, inner: None, frame: None, top };
+    }
+    let inner = meshes.add(to_mesh(pushed(&part, INNER_GAP)));
+    Staged { shown: Some(meshes.add(to_mesh(part))), inner: Some(inner), frame: None, top }
+}
+
 /// Kit meshes shared by every building of one kind and owner, made the first time one shows:
 /// the built model with its chimney top, and the construction frame.
 #[derive(Default)]
@@ -356,11 +370,11 @@ fn respawn_buildings(
         let built_vault = (stage == Stage::Built).then_some(b.vault).flatten();
         let vault_model = built_vault.filter(|_| original.is_some() && posable_vaults).is_some();
         let vault_slab = built_vault.filter(|_| generated.is_some()).map(|v| crate::vault::slab_at(v.door_and_top().0));
+        let is_original = original.is_some();
         let (look, skin, frame_skin, flames) = match (original, generated) {
             (Some((obj, mat)), _) => {
                 let solid = solid_part(obj);
-                let mut look = staged(&object_mesh(&solid, tribe), pieces, &mut meshes);
-                look.frame = pieces.map(|_| meshes.add(to_mesh(beams(&object_edges(&solid), BEAM))));
+                let look = original_staged(&solid, tribe, pieces, &mut meshes);
                 (look, mat, wood.clone(), flame::flame_mesh(obj))
             }
             (_, Some(look)) => {
@@ -393,13 +407,18 @@ fn respawn_buildings(
             view.with_child((Mesh3d(frame), MeshMaterial3d(frame_skin)));
         }
         // Open while under construction: its faces' outer side as usual, their inner side in the
-        // tribe colour, so the inside of the building is not seen through the structure.
+        // tribe colour, so the inside of the building is not seen through the structure; an original
+        // model's inner side in its own textures instead, its frame being see-through beams.
         let open = !matches!(stage, Stage::Built);
         let skin = match mats.get(&skin).filter(|_| open).cloned() {
             Some(m) => mats.add(StandardMaterial { cull_mode: Some(Face::Back), double_sided: false, ..m }),
             None => skin,
         };
-        let inner = look.inner.map(|mesh| (mesh, mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() })));
+        let inner_skin = match mats.get(&skin).filter(|_| is_original).cloned() {
+            Some(m) => mats.add(StandardMaterial { cull_mode: Some(Face::Front), double_sided: true, ..m }),
+            None => mats.add(StandardMaterial { base_color: tribe_color(owner), perceptual_roughness: 0.9, cull_mode: Some(Face::Front), double_sided: true, ..default() }),
+        };
+        let inner = look.inner.map(|mesh| (mesh, inner_skin));
         let top = look.top;
         extras.heights.0.insert(b.id, top.y);
         if stage == Stage::Built && kind.capacity() > 0 {

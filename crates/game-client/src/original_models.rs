@@ -42,17 +42,39 @@ pub struct MeshData {
 /// world (`game_frame`: the objects are in the game's left-handed frame), with the
 /// tribe-coloured tiles of `tribe` (objects are stored in blue).
 pub fn object_mesh(obj: &Object, tribe: game_core::tribes::TribeId) -> MeshData {
+    faces_mesh(obj, tribe, obj.faces.iter().map(|f| (f, false)))
+}
+
+/// A building's object at construction stage `stage` (0-3, `construction_stage`), as the original draws it
+/// (pop3-rev-analysis.md "Drawing a building by stage" [exe]): only the faces whose stage byte shows them then,
+/// those marked wood in plain wood (`WOOD_TILE`, the whole tile) instead of their own texture.
+pub fn staged_object_mesh(obj: &Object, tribe: game_core::tribes::TribeId, stage: u8) -> MeshData {
+    faces_mesh(obj, tribe, obj.faces.iter().filter_map(|f| f.at_stage(stage).map(|wood| (f, wood))))
+}
+
+/// The atlas tile of plain dark wood a building under construction shows its frame in [exe].
+pub const WOOD_TILE: u16 = 250;
+
+/// A whole tile's corners, 16.16 texels, for a face drawn in `WOOD_TILE`.
+const WHOLE_TILE: [(i32, i32); 4] = [(0, 0), (32 << 16, 0), (32 << 16, 32 << 16), (0, 32 << 16)];
+
+fn faces_mesh<'a>(obj: &Object, tribe: game_core::tribes::TribeId, faces: impl Iterator<Item = (&'a pop3_format::Face, bool)>) -> MeshData {
     let scale = obj.cells_per_unit();
     let mut m = MeshData::default();
-    for face in &obj.faces {
+    for (face, wood) in faces {
         let corners: Vec<([f32; 3], [f32; 2])> = face
             .points
             .iter()
             .zip(&face.uv)
-            .map(|(&i, &uv)| {
+            .enumerate()
+            .map(|(k, (&i, &uv))| {
                 let p = obj.points[i as usize];
                 let at = GamePos(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale);
-                (Vec3::from(at).into(), face_uv(face.tile.map(|t| tribe_tile(t, tribe.as_u8())), face.colour, uv))
+                let uv = match wood {
+                    true => face_uv(Some(WOOD_TILE), 0, WHOLE_TILE[k % 4]),
+                    false => face_uv(face.tile.map(|t| tribe_tile(t, tribe.as_u8())), face.colour, uv),
+                };
+                (Vec3::from(at).into(), uv)
             })
             .collect();
         for tri in [mirrored([0, 1, 2]), mirrored([0, 2, 3])].iter().take(corners.len() - 2) {
@@ -140,7 +162,7 @@ mod tests {
     fn quad() -> Object {
         Object {
             points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]],
-            faces: vec![Face { tile: Some(9), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0 }],
+            faces: vec![Face { tile: Some(9), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0, stages: 0 }],
             scale: 0,
         }
     }

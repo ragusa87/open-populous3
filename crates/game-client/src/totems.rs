@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn the_stone_head_splits_at_its_neck_and_nods() {
-        let quad = |a: u16, b: u16, c: u16, d: u16| Face { tile: Some(1), colour: 0, points: vec![a, b, c, d], uv: vec![(0, 0); 4], flags: 6 };
+        let quad = |a: u16, b: u16, c: u16, d: u16| Face { tile: Some(1), colour: 0, points: vec![a, b, c, d], uv: vec![(0, 0); 4], flags: 6, stages: 0 };
         let points = vec![[0, 0, 0], [10, 0, 0], [10, NECK, 0], [0, NECK, 0], [10, 900, 0], [0, 900, 0]];
         let (pedestal, head) = split_head(&Object { points, faces: vec![quad(0, 1, 2, 3), quad(3, 2, 4, 5)], scale: 0 });
         assert_eq!((pedestal.faces.len(), head.faces.len()), (1, 1));

@@ -659,13 +659,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   building-local flame-intensity distinct from this door-point object - not resolved, so not a basis for a fix.
 - [ ] Ashes (combat.md "Ashes"): the hover text ("damaged ground", our words), the long damage smoke over them, the whirlwind's destruction. Lava and earthquake ground sharing the mark is done (`lava.rs`'s `WorldEvent::Scorch`, both `Mode::Static` and `Mode::Flowing`).
 - [ ] Building debris (client `explosion.rs`, pop3-rev-analysis.md "Flying faces (the partial explosion)"): a piece is gone the moment it lands (done); left: its dust puff and sound 0x13 there (a splash in water).
-- [ ] Construction and damage look for original objects, as the original (pop3-rev-analysis.md "Drawing a
-  building by stage"): drop the edge beams and the height-sorted `built_part` (client `construction.rs`); draw the
-  building's own mesh with only the faces whose `facs` byte 59 has bit `stage` set, those with bit `4 + stage`
-  also set in plain wood (atlas tile 250, whole tile), the others with their own texture; stage = 0-3 from wood
-  stock / cost (4 = built, every face). A damaged built building uses the same drawing at its new stage until
-  repaired to full. Needs the stage byte parsed in `pop3_format::objects` (objects.md). The generated kit has no
-  such flags: keep its own frame or give its parts stage tags the same way.
+- [x] Construction and damage look for original objects (pop3-rev-analysis.md "Drawing a building by stage"): each face drawn by its stage byte (`Face::at_stage`, `staged_object_mesh`), the frame in tile 250; the generated kit keeps its own frame (decided).
 - [ ] Construction, see [buildings.md#construction-planned](docs/specs/buildings.md): only hut (size 1), drum tower, training huts, boat/airship huts; never the reincarnation site, prison, vault, totems.
 - [ ] Build tab: icons, discoveries unlocking "?".
 - [ ] Blueprint: tune `STEEP_SPREAD`; check the door side of the other kinds against the original objects.

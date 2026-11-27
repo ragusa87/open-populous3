@@ -3,16 +3,22 @@
 //! built (one band per piece of wood, from the ground up), and where a hut's chimney smokes.
 //! Pure functions on `MeshData`, in the building's own frame (cells, y up).
 
-use crate::game_frame::GamePos;
 use crate::original_models::MeshData;
 use bevy::math::Vec3;
-use pop3_format::Object;
 
 /// Beam thickness (cells) of the wooden structure.
 pub const BEAM: f32 = 0.022;
 
 /// A segment between two points (cells).
 pub type Edge = (Vec3, Vec3);
+
+/// The construction stage (0-3) a building shows with `used` of its `of` pieces of wood (pop3-rev-analysis.md
+/// "Drawing a building by stage" [exe]): `(stock × 4 - 1) / (cost - 1)` in wood, clamped; a hut (3 pieces) shows
+/// stages 0, 1, 2, a drum tower (9) 0, 0, 1, 1, 2, 2, 3, 3.
+pub fn construction_stage(used: u8, of: u8) -> u8 {
+    let (stock, cost) = (used as u32 * 100, (of as u32 * 100).max(2));
+    if stock == 0 { 0 } else { ((stock * 4 - 1) / (cost - 1)).min(3) as u8 }
+}
 
 /// The triangles built with `used` of `of` pieces: triangles sorted by the height of their
 /// centre (lowest first, stable), the first `used / of` of them. A building grows from the ground
@@ -52,28 +58,6 @@ pub fn pushed(mesh: &MeshData, by: f32) -> MeshData {
         out.positions.push((Vec3::from(*p) + Vec3::from(*n) * by).into());
     }
     out
-}
-
-/// The edges of an original object's faces, once each (shared edges and quads' diagonals are not
-/// doubled), in cells, drawn mirrored like `original_models::object_mesh`.
-pub fn object_edges(obj: &Object) -> Vec<Edge> {
-    let mut seen = std::collections::BTreeSet::new();
-    let scale = obj.cells_per_unit();
-    let point = |i: u16| {
-        let p = obj.points[i as usize];
-        Vec3::from(GamePos(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) * scale))
-    };
-    let mut edges = Vec::new();
-    for face in &obj.faces {
-        let n = face.points.len();
-        for k in 0..n {
-            let (a, b) = (face.points[k], face.points[(k + 1) % n]);
-            if a != b && seen.insert((a.min(b), a.max(b))) {
-                edges.push((point(a), point(b)));
-            }
-        }
-    }
-    edges
 }
 
 /// A box `size` (cells) standing on the origin, as `layers` stacked rings of side walls and a lid:
@@ -162,7 +146,6 @@ pub fn chimney(mesh: &MeshData) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pop3_format::Face;
 
     fn heights(m: &MeshData) -> Vec<f32> {
         m.indices.chunks(3).map(|t| t.iter().map(|&i| m.positions[i as usize][1]).sum::<f32>() / 3.0).collect()
@@ -185,21 +168,6 @@ mod tests {
             last = n;
         }
         assert_eq!(built_part(&full, 9, 4).indices.len(), full.indices.len(), "never past the whole");
-    }
-
-    #[test]
-    fn edges_of_a_quad_without_its_diagonal() {
-        let obj = Object {
-            points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0], [0, 0, 512]],
-            faces: vec![
-                Face { tile: None, colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0); 4], flags: 0 },
-                Face { tile: None, colour: 0, points: vec![0, 1, 4], uv: vec![(0, 0); 3], flags: 0 },
-            ],
-            scale: 0,
-        };
-        let edges = object_edges(&obj);
-        assert_eq!(edges.len(), 6, "4 of the quad + 2 more of the triangle, 0-1 shared");
-        assert!(edges.contains(&(Vec3::ZERO, Vec3::X)));
     }
 
     #[test]
@@ -251,5 +219,11 @@ mod tests {
     fn chimney_at_the_top() {
         let c = chimney(&layered_box(Vec3::new(2.0, 1.5, 2.0), 2));
         assert!((c - Vec3::new(0.0, 1.5, 0.0)).length() < 1e-5);
+    }
+
+    #[test]
+    fn the_stage_follows_the_wood_as_the_original_s() {
+        assert_eq!((0..3).map(|u| construction_stage(u, 3)).collect::<Vec<_>>(), [0, 1, 2], "a hut");
+        assert_eq!((0..9).map(|u| construction_stage(u, 9)).collect::<Vec<_>>(), [0, 0, 0, 1, 1, 2, 2, 3, 3], "a drum tower");
     }
 }

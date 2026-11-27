@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn flame_mesh_keeps_only_blended_faces_with_tile_uvs() {
-        let face = |flags, uv: i32| Face { tile: Some(92), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0), (uv << 16, 0), (uv << 16, 31 << 16), (0, 31 << 16)], flags };
+        let face = |flags, uv: i32| Face { tile: Some(92), colour: 0, points: vec![0, 1, 2, 3], uv: vec![(0, 0), (uv << 16, 0), (uv << 16, 31 << 16), (0, 31 << 16)], flags, stages: 0 };
         let obj = Object { points: vec![[0, 0, 0], [512, 0, 0], [512, 512, 0], [0, 512, 0]], faces: vec![face(0, 31), face(pop3_format::objects::FACE_ALPHA, 15)], scale: 0 };
         let m = flame_mesh(&obj);
         assert_eq!(m.indices.len(), 6, "the blended face only");

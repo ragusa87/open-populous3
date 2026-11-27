@@ -31,12 +31,21 @@ pub struct Face {
     pub uv: Vec<(i32, i32)>,
     /// Byte 7 of the record: render flags, mostly unknown (`FACE_ALPHA`).
     pub flags: u8,
+    /// Byte 59: the construction stages it shows in (objects.md, pop3-rev-analysis.md "Drawing a building by
+    /// stage"): bit `s` (0-3) drawn at stage `s`, bit `4 + s` drawn there as plain wood; 0 only once built.
+    pub stages: u8,
 }
 
 impl Face {
     /// Whether the face is blended through the alpha table (`FACE_ALPHA`): a flame.
     pub fn is_alpha(&self) -> bool {
         self.flags & FACE_ALPHA != 0
+    }
+
+    /// How it is drawn at construction stage `stage` (0-3): None not at all, else whether as plain wood.
+    pub fn at_stage(&self, stage: u8) -> Option<bool> {
+        let s = stage.min(3);
+        (self.stages & (1 << s) != 0).then_some(self.stages & (0x10 << s) != 0)
     }
 }
 
@@ -90,6 +99,7 @@ fn parse_face(r: &[u8]) -> Option<Face> {
         points: (0..n).map(|k| u16_at(r, 40 + k * 2)).collect(),
         uv: (0..n).map(|k| (i32_at(r, 8 + k * 8), i32_at(r, 12 + k * 8))).collect(),
         flags: r[7],
+        stages: r[59],
     })
 }
 
@@ -229,6 +239,20 @@ mod tests {
         assert_eq!(o.faces[0].uv[2], (2 << 16, 0));
         assert_eq!((o.faces[1].tile, o.faces[1].colour, o.faces[1].points.len()), (None, 9, 4));
         assert!(bank.get(1).is_none(), "empty slot");
+    }
+
+    #[test]
+    fn a_face_s_stage_byte_says_when_it_shows_and_as_wood() {
+        let face = |stages: u8| {
+            let mut r = face_rec(17, &[0, 1, 2]);
+            r[59] = stages;
+            parse_face(&r).unwrap()
+        };
+        let frame = face(0x3F);
+        assert_eq!((0..4).map(|s| frame.at_stage(s)).collect::<Vec<_>>(), [Some(true), Some(true), Some(false), Some(false)], "wood, then finished");
+        assert_eq!(face(0x88).at_stage(3), Some(true));
+        assert_eq!(face(0x88).at_stage(0), None);
+        assert_eq!(face(0).at_stage(2), None, "only once built");
     }
 
     #[test]
