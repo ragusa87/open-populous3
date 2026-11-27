@@ -166,7 +166,10 @@ impl GameMap {
             return;
         };
         let amount = if at_door { 0 } else { attacker.kind.stats().sabotage };
-        self.buildings[b].wear_down(amount);
+        // A ghost's hits never damage a building (pop3-rev-analysis.md "Ghost Army mechanics" [exe]).
+        if !attacker.statuses.ghost {
+            self.buildings[b].wear_down(amount);
+        }
         let centre = self.buildings[b].centre();
         self.units[i].face(centre);
         if !left.tick() {
@@ -291,6 +294,16 @@ mod tests {
         until(&mut map, 6000, |m| m.building(hut).is_none()).expect("destroyed");
         assert!(!map.ashes.buildable(cell), "left in ashes");
         assert_eq!(map.unit(a).unwrap().action, Action::Idle, "nothing left to attack");
+    }
+
+    #[test]
+    fn a_ghost_hacks_at_a_hut_without_wearing_it() {
+        let (mut map, hut, a) = siege(UnitKind::Warrior);
+        map.unit_mut(a).unwrap().statuses.ghost = true;
+        until(&mut map, 300, |m| matches!(m.unit(a).unwrap().action, Action::Hacking { at_door: false, .. })).expect("hacking");
+        (0..200).for_each(|_| _ = map.tick());
+        let b = map.building(hut).unwrap();
+        assert_eq!((b.wear, b.used), (0, b.kind.wood_cost()));
     }
 
     #[test]

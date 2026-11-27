@@ -71,8 +71,8 @@ ghosts look like ordinary units to that enemy. Traced since (pop3-rev-analysis.m
 cast uses the generic pipeline unchanged, `CAST_RELEASE` (6 turns) then a standard shot (1400 units per turn)
 from the shaman, then the 5-turn controller, so ours, which adds the controller the instant the cast releases,
 lacks only the shot flight (the generic "every spell flies as a shot" gap, TODO.md); and an ordinary looker
-finds and ranks a ghost exactly like a live unit, so nothing to change there. Not done: a ghost attacking a
-building does no damage to it in the original. Dev: cast through the HUD
+finds and ranks a ghost exactly like a live unit, so nothing to change there. A ghost hacking at a building
+never wears it down, nor shakes it (`GameMap::hack`, as the original). Dev: cast through the HUD
 (`SpellKind::GhostArmy`). |
 
 To do: the other original spells, as traced in pop3-rev-analysis.md "Per spell" (any randomness through `map::Lcg`,
