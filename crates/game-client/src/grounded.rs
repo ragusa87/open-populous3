@@ -124,6 +124,16 @@ pub fn ground_normal(map: &Heightmap, focus: Vec2, params: &CurveParams, dx: f32
     Vec3::new(-slope_x, 1.0, -slope_z).normalize()
 }
 
+/// How a part standing at map position `at` (cells) leans with the ground `half` cells either side, turned by
+/// `yaw` (`Tilted`).
+pub fn tilt_rotation(map: &Heightmap, focus: Vec2, params: &CurveParams, at: Vec2, half: f32, yaw: GameYaw) -> Quat {
+    let size = map.size() as f32;
+    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
+    let r = Vec3::from(GamePos::ground(wrap(at.x - focus.x), 0.0, wrap(at.y - focus.y)));
+    let normal = ground_normal(map, focus, params, r.x, r.z, half);
+    Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from(yaw)
+}
+
 /// Leans `Tilted` parts with the ground under them (after `place_grounded` put them there).
 fn tilt_grounded(
     rig: Res<CameraRig>,
@@ -131,12 +141,8 @@ fn tilt_grounded(
     params: Res<CurveParamsRes>,
     mut q: Query<(&Grounded, &Tilted, &mut Transform)>,
 ) {
-    let size = map.0.terrain.size() as f32;
-    let wrap = |d: f32| (d + size / 2.0).rem_euclid(size) - size / 2.0;
     for (g, tilt, mut t) in &mut q {
-        let at = Vec3::from(GamePos::ground(wrap(g.at.x - rig.focus.x), 0.0, wrap(g.at.y - rig.focus.y)));
-        let normal = ground_normal(&map.0.terrain, rig.focus, &params.0, at.x, at.z, tilt.half);
-        let rotation = Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from(tilt.yaw);
+        let rotation = tilt_rotation(&map.0.terrain, rig.focus, &params.0, g.at, tilt.half, tilt.yaw);
         if t.rotation != rotation {
             t.rotation = rotation;
         }

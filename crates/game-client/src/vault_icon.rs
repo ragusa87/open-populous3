@@ -2,7 +2,7 @@
 //! glyph of what it teaches (`hfx0-0.dat`, `icon_sprite`) as a fixed camera-facing billboard over the vault, and
 //! under it, 80 lower, an animated glow (hfx 1417-1432), 1072 terrain height units (4.19 cells) over the ground,
 //! just over the apex of the pyramid drawn at its own scale (pop3-rev-analysis.md "Model size"), over the middle of
-//! its head. Both go as the pyramid's top
+//! its head, leaning with it as the pyramid leans with the ground (`grounded::tilt_rotation`). Both go as the pyramid's top
 //! starts closing over the reward given (the player's choice: the original's go on the turn the vault fires, its
 //! gauge full). Without the original files, the generated spell glyph where there is one, no glow.
 //! Ours: the glow's sprite per moment (one round of its 16 sprites every `GLOW_LOOP`), no ground light.
@@ -179,20 +179,20 @@ impl WorldView for VaultIconView {
     fn update(&self, b: &Building, now: SimNow, (map, rig, params, assets, objects, models, parts): &mut SystemParamItem<Self::Params>) {
         let cell = WORLD_UNITS_PER_CELL as f32;
         let (x, z) = b.centre();
-        let ground = render_pos(&map.0.terrain, &Grounded { at: Vec2::new(x as f32, z as f32) / cell, half: 0.0 }, rig.focus, &params.0);
+        let at = Vec2::new(x as f32, z as f32) / cell;
+        let ground = render_pos(&map.0.terrain, &Grounded { at, half: 0.0 }, rig.focus, &params.0);
+        let lean = crate::grounded::tilt_rotation(&map.0.terrain, rig.focus, &params.0, at, crate::buildings::FOOTPRINT_HALF, crate::buildings::facing_yaw(b.facing));
         let facing = Quat::from_rotation_y(rig.yaw) * Quat::from_rotation_x(-rig.pitch);
         let group = objects.get(crate::object_scale::ObjectGroup::Buildings);
-        let scale = group / HEIGHT_UNITS_PER_CELL;
         let glow = (!assets.glow.is_empty()).then(|| &assets.glow[glow_frame(now.secs_since(game_core::time::Tick::ZERO), assets.glow.len())]);
         let pyramid = models.0.as_ref().and_then(|bank| bank.get(pop3_format::catalog::KNOWLEDGE_PYRAMID));
-        let height = ICON_HEIGHT;
         let (hx, hz) = head_centre(pyramid);
-        let head = Quat::from(crate::buildings::facing_yaw(b.facing)) * Vec3::from(crate::game_frame::GamePos(Vec3::new(hx, 0.0, hz) * group));
-        for (part, lift, frame) in [(self.icon, height, None), (self.glow, height - GLOW_BELOW, glow)] {
+        let over = |lift: f32| lean * Vec3::from(crate::game_frame::GamePos(Vec3::new(hx, lift / HEIGHT_UNITS_PER_CELL, hz) * group));
+        for (part, lift, frame) in [(self.icon, ICON_HEIGHT, None), (self.glow, ICON_HEIGHT - GLOW_BELOW, glow)] {
             let Ok((mut t, mut vis, mut mesh, mut mat)) = parts.get_mut(part) else { continue };
             match ground {
                 Some(g) if part == self.icon || frame.is_some() => {
-                    (t.translation, t.rotation, *vis) = (g + head + Vec3::Y * lift * scale, facing, Visibility::Inherited);
+                    (t.translation, t.rotation, *vis) = (g + over(lift), facing, Visibility::Inherited);
                     if let Some(f) = frame {
                         (mesh.0, mat.0) = (f.mesh.clone(), f.material.clone());
                     }
