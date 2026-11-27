@@ -160,7 +160,9 @@ it the quality option: what only low quality changes (no ambience bed, no stop f
 - Interface and voices (`audio_cues.rs`): the selection's bow lines and the order answers by type and crowd size
   1/2/3/4+ (wildmen count as followers), the flyby's start (`0x6F`) and cancel (`0x6E`), the menu click
   (`0x6A`), a reincarnation site's stones rising (`0x9F`, every second stone, "Pillars" [exe]) and each stone
-  head talking once per nod as it tips forward (`0xC1`; the original on its animation's key frame).
+  head talking once per nod as it tips forward (`0xC1`; the original on its animation's key frame); the discovery
+  cinematic (client `discovery.rs`, `discovery_building.rs`): `0x71` as a spell's starts, `0xCC`, `0xCB` and `0xCE`
+  as a building's starts and `0xCD` as it leaves for the panel (ours: `0xCE` not stopped, all flat).
 - Game events (`audio_world.rs`), each system comparing the map with what it saw last frame (nothing sounds for
   what is there when a map loads), by the triggers of the id table:
   - People: the death cry, the shaman's own by tribe, a ghost's poof (the Angel of Death none: its roar `0xDC`

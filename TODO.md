@@ -1020,15 +1020,15 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   1417-1432) and a dynamic ground light. Only for permanent discoveries. Remove both when the vault fires
   (`Vault::grant`), not when the reward lands.
 - [ ] HUD: show the gauge over the totem/pyramid and who is praying.
-- [ ] Discovery cinematic for the player's own rewards (pop3-rev-analysis.md "Discovery cinematic: the reward
-  flies to the panel"; ours shows nothing). Building: its model bursts into its faces from the vault's screen
-  position, flies to the screen centre growing, rebuilds, turns, then peels face by face onto its panel button,
-  which the side panel switches to. Spell: its panel glyph flies to the screen centre growing to 8× and turning,
-  then shrinks onto its spell button. Both: a burst of 200 sparkles at the start, a sparkle on the button, the
-  sounds of the analysis (0xCC/0xCB/0xCE/0xCD for a building, 0x71 for a spell). The reward is applied when the
-  flight reaches the button. The original counts in drawn frames; ours should use time (pick the frame rate the
-  counts are meant for after a live check). Mana and totem rewards: not traced.
-
+- [x] Discovery cinematic for the player's own rewards (worship.md "Granted to the player"; game-core `discovery.rs`,
+  client `discovery.rs`, `discovery_building.rs`, `discovery_sparkles.rs`): a human tribe's building or spell lands
+  once its cinematic reaches the panel, a fixed delay in turns; computer tribes' at once.
+- [ ] Discovery cinematic leftovers: the frame rate its frame counts are meant for (ours guesses 30 a second, so
+  `BUILDING_FLIGHT`/`SPELL_FLIGHT`) after a live check; stop sound 0xCE 24 frames into the flight to the panel (it
+  needs a stoppable one-shot); the burst's trails (sprites 318-321, bank not identified) and its heading (ours
+  towards the middle of the view); the panel kept open 4 more turns after; the fallback start widget when the vault
+  is out of view (ours: the middle of the side panel); mana and other rewards' swirl cinematic (untraced, they land
+  at once).
 ## Priority 2 — computer players (AI) and what it needs
 The single biggest remaining system, and the one that turns this from a sandbox/multiplayer tech demo into an actual single-player game. Sequenced after priority 1 on purpose: AI scripts can invoke any spell/building/unit action through the same order/coordinator machinery, so building the interpreter against still-incomplete systems means repeated rework. Tribes and level scripting are its direct prerequisites (per-tribe state, triggers the scripts fire).
 
