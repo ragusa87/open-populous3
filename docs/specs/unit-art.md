@@ -160,10 +160,11 @@ SitDown, StandUp, SwordSlash, Victory, Walk, Walk_Carry), no props, and hand bon
 | 38 | spirit rising, calm (the ordinary case: not drowning) | followers | Death last frame, sunk | a see-through copy rising, drawn in post (alpha sprite), 4 clip-turns only (not a long rise) |
 | 40 | spirit rising, climbing (dying while drowning - always for a wildman, regardless of cause of death; others only if they died in a drowning-eligible spot) | followers, wild | Death last frame, lifted | a REAL rising copy (not drawn in post): continuous upward motion for the full clip, no alpha fade needed since it already reads as "leaving"; for a wildman only, also spin the copy about its vertical axis every frame (pop3-rev-analysis.md "Death and the spirit rise") |
 | 97 | carbonized by lightning | brave | Death or Idle frame | every material black in post (like the magenta key) |
-| 89, 90, 92, 48 | itching, push-ups, juggling, hiding the eyes | brave, warrior, spy | none | new clips authored in Blender |
+| 89, 90, 48 | itching, push-ups, hiding the eyes | brave, warrior | none | new clips authored in Blender |
 
-The bored-pose picker itself (89/90/91/92, pop3-rev-analysis.md "Bored poses") is wired for original assets
-(`units::art::bored`, `Pose::Scratch`/`Pushup`/`Juggle`): only the CC0 clips above are still missing,
+The bored-pose picker itself (89/90/91, pop3-rev-analysis.md "Bored poses") is wired for original assets
+(`units::art::bored`, `Pose::Scratch`/`Pushup`; the spy's juggling, 92, is never played by the original, so
+not by ours): only the CC0 clips above are still missing,
 same as the taunts (48-50) - until then `Pose::fallback` holds plain `Idle` for the generated figure. 90 and
 91 are not two phases of one cycle: the original plays 91 (headband) for a warrior and 90 (firewarrior gear) for
 a firewarrior (pop3-rev-analysis.md "Bored poses"), as ours does.

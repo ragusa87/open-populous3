@@ -80,14 +80,12 @@ pub enum Pose {
     Scratch,
     /// Bored while standing: a warrior or a firewarrior does push-ups.
     Pushup,
-    /// Bored while standing: a spy juggles.
-    Juggle,
     /// A spy crouched at a wall setting it on fire, firebrand in hand (arson.rs; original anim 17; our art: kneeling).
     SetFire,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 36] = [
+    pub const ALL: [Pose; 35] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Pray,
@@ -122,7 +120,6 @@ impl Pose {
         Pose::Drink,
         Pose::Scratch,
         Pose::Pushup,
-        Pose::Juggle,
         Pose::SetFire,
     ];
 
@@ -142,7 +139,7 @@ impl Pose {
             Pose::Carbonized => Pose::Fall,
             Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => Pose::Idle,
             Pose::Eat | Pose::Drink => Pose::Idle,
-            Pose::Scratch | Pose::Pushup | Pose::Juggle => Pose::Idle,
+            Pose::Scratch | Pose::Pushup => Pose::Idle,
             pose => pose,
         }
     }
@@ -160,7 +157,7 @@ impl Pose {
             Pose::Panic => 12.0,
             Pose::Drown | Pose::Flung | Pose::Tumble => 8.0,
             Pose::Pray | Pose::Preach | Pose::Stranded => 4.0,
-            Pose::Scratch | Pose::Pushup | Pose::Juggle => 12.0,
+            Pose::Scratch | Pose::Pushup => 12.0,
             _ => 6.0,
         }
     }
@@ -185,7 +182,7 @@ impl Pose {
             // Never actually shown for her either (wildman-only, `pose_of`): exhaustiveness only.
             Pose::Eat | Pose::Drink => ShamanAnim::Idle,
             // Never actually shown for her either (follower-kind-specific, `bored`): exhaustiveness only.
-            Pose::Scratch | Pose::Pushup | Pose::Juggle => ShamanAnim::Idle,
+            Pose::Scratch | Pose::Pushup => ShamanAnim::Idle,
         }
     }
 }
@@ -277,14 +274,13 @@ fn bored_turns_per_frame(kind: UnitKind) -> u32 {
 
 /// The bored pose for `kind` and how long it lasts (ticks): one loop of its animation, cut by the
 /// original's timer of anim 89's 12 frames x turns per frame + 1 ("Bored poses"). A brave scratches (89, 12 frames), a
-/// warrior (91) or a firewarrior (90) does push-ups (14 frames). The spy's juggling (92, 17 frames) is
-/// not triggered by this loop in the original: `[ours]`, same rhythm, one whole loop.
+/// warrior (91) or a firewarrior (90) does push-ups (14 frames). The spy has none: its juggling (92) is never played
+/// by the original.
 fn bored_pose(kind: UnitKind) -> Option<(Pose, u32)> {
     let timer = |frames: u32| (frames * bored_turns_per_frame(kind)).min(12 * bored_turns_per_frame(kind) + 1);
     match kind {
         UnitKind::Brave => Some((Pose::Scratch, timer(12))),
         UnitKind::Warrior | UnitKind::Firewarrior => Some((Pose::Pushup, timer(14))),
-        UnitKind::Spy => Some((Pose::Juggle, 17)),
         _ => None,
     }
 }
@@ -514,7 +510,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Eat => WildmanAnim::Eat,
                 Pose::Drink => WildmanAnim::Drink,
                 // Never actually shown for a wildman (follower-kind-specific, `bored`): exhaustiveness only.
-                Pose::Scratch | Pose::Pushup | Pose::Juggle => WildmanAnim::Stand,
+                Pose::Scratch | Pose::Pushup => WildmanAnim::Stand,
             };
             // No spirit anim known: the body lies still (the fall's last frame).
             (anim.anim(), None, (pose == Pose::Spirit).then_some(3))
@@ -566,7 +562,6 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::Scratch => PersonAnim::Scratch,
                 Pose::Pushup if kind == UnitKind::Warrior => PersonAnim::PushupHeadband,
                 Pose::Pushup => PersonAnim::Pushup,
-                Pose::Juggle => PersonAnim::Juggle,
             };
             (anim.anim(), outfit, (pose == Pose::Stranded).then_some(ARMS_UP_FRAME))
         }
@@ -708,7 +703,7 @@ mod tests {
 
     #[test]
     fn bored_is_none_for_kinds_with_no_pose_of_their_own() {
-        for kind in [UnitKind::Shaman, UnitKind::Preacher, UnitKind::Wildman] {
+        for kind in [UnitKind::Shaman, UnitKind::Preacher, UnitKind::Wildman, UnitKind::Spy] {
             assert!((0..4096u32).all(|t| bored(kind, UnitId::from_raw(7), Tick::from_wire(t)).is_none()), "{kind:?}");
         }
     }
@@ -719,7 +714,6 @@ mod tests {
         assert_eq!(hit(UnitKind::Brave), Some(Pose::Scratch));
         assert_eq!(hit(UnitKind::Warrior), Some(Pose::Pushup));
         assert_eq!(hit(UnitKind::Firewarrior), Some(Pose::Pushup));
-        assert_eq!(hit(UnitKind::Spy), Some(Pose::Juggle));
     }
 
     #[test]

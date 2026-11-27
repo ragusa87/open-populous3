@@ -66,7 +66,7 @@ pub fn frame_count(pose: Pose) -> usize {
         Pose::Carbonized => frame_count(Pose::Fall),
         Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => frame_count(Pose::Idle),
         Pose::Eat | Pose::Drink => frame_count(Pose::Idle),
-        Pose::Scratch | Pose::Pushup | Pose::Juggle => frame_count(Pose::Idle),
+        Pose::Scratch | Pose::Pushup => frame_count(Pose::Idle),
         Pose::SetFire => frame_count(Pose::Pray),
     }
 }
@@ -175,7 +175,7 @@ fn body(pose: Pose, view: View, f: usize) -> Body {
         Pose::TauntHide | Pose::TauntWave | Pose::TauntPunch => body(Pose::Idle, view, f),
         Pose::Eat | Pose::Drink => body(Pose::Idle, view, f),
         // No CC0 clip authored yet (unit-art.md "Planned poses"): the fallback pose's own figure.
-        Pose::Scratch | Pose::Pushup | Pose::Juggle => body(Pose::Idle, view, f),
+        Pose::Scratch | Pose::Pushup => body(Pose::Idle, view, f),
     }
 }
 
