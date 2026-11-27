@@ -240,19 +240,9 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
 - [ ] State transitions: `Unit::panic`/`Unit::catch_fire` (`unit.rs`) both call `drop_plans()`, cancelling the route, destination, teleport/spell targets, every pending "go do X" field, the order queue, the patrol list and any work assignment outright. **Confirmed, not just suspected, as a real divergence** (pop3-rev-analysis.md "Resuming a fight cut short by a push", addendum): the original's state-transition mechanism itself has no generic "forget your plans" step anywhere (`0x4ED6F0`, always called on any transition, is a no-op; `0x4ED640` only runs the new state's own entry case), Fight is independently confirmed to never release a participant's command group, and person states 26 (panic) and 31 (on fire) were each read exhaustively, start to finish, this session - neither touches the order/command-group slot (`+0x9B`/`+0x8B`/`+0xA6`) or calls `group_release` anywhere. Fix: `panic`/`catch_fire` should stop calling the full `drop_plans()` and instead just interrupt the current task the way Fight already does (`resume_attack`-style), so it resumes unprompted afterward instead of leaving the person with nothing queued. Also resolve the existing inconsistency this surfaced: the `Drowning` transition (`unit.rs` `tick()`) does a hand-picked partial reset (`teleport_to`/`spell` only) rather than calling `drop_plans()` at all - whichever way `panic`/`catch_fire` are fixed, make `Drowning`'s own reset consistent with it rather than its own third, narrower variant. (Unrelated to the above but found alongside it: on-fire's own entry in the original also forces the SAME random run panic does, for the whole 70-turn burn, gated by a ghost-check rather than panic's blast flag - `catch_fire`'s existing `run_in_panic`-for-the-whole-burn already matches this, no change needed there.)
 - [ ] Spies, left open after the implementation below (units.md "Spies"): a spec session to reconcile "arson is not player-reachable"
   (pop3-rev-analysis.md) with play, where a spy's attack on a building sets it on fire (user-confirmed, implemented
-  so); ~~how the computer fills its arson worklist and what
-  `SPY_CHECK_FREQUENCY`/`MAX_SPY_ATTACKS` mean~~ RESOLVED 2026-11-27 (pop3-rev-analysis.md "Arson", the AI's spy
-  branch and sabotage raids): `MAX_SPY_ATTACKS` caps concurrent sabotage raids (one spy each, as ours reads it),
-  but a raid targets a random building (walls excluded) of a random enemy tribe, not the nearest - change
-  `ai_spy.rs`'s target choice; `SPY_CHECK_FREQUENCY` is NOT the discovery cadence: it is how often (every 4F runs
-  of the attack task, 0 = never) spies marching with an attack re-disguise as the attacked tribe - `ai_spy.rs`'s
-  32-turn discovery rhythm stays `[guess]` (the discovery task's own cadence is untraced), and spies in attack
-  parties (not implemented) would use it; the 10-building worklist belongs to those attack parties (its filling
-  untraced); ~~the
-  discovery sweep's radius~~ RESOLVED 2026-11-27 ("What un-disguises a spy"): the 3x3 cells around the caught
-  spy (radius 1, not 3), and only spies standing inside the AI tribe's settlement area (a disc of 10 cells
-  around each of its buildings, 4/6/8 with `SET_DEFENCE_RADIUS` 5/7/9) are rolled for - `ai_spy.rs` checks
-  everywhere: fix both; the
+  so); the computer's spy-discovery task's cadence (`ai_spy.rs`'s 32 turns, `[guess]`: a question
+  for a spec session); spies marching with an attack party (re-disguised every 4 × `SPY_CHECK_FREQUENCY` runs of
+  the attack task, and that party's 10-building worklist, its filling untraced): not implemented; the
   original's own reveal cursor sprite (ours: a generated punch badge); the throw sound (0x36, no sound events yet).
 - [x] Spies (implemented: `disguise.rs`, `arson.rs`, `ai_spy.rs`, client `units/spy.rs`, `hud/disguise.rs`; the
   delay is simply 63 of our ticks, one per original turn): disguise is one packed byte per spy (apparent tribe + a transition countdown, `SPY_DISGUISE_DELAY`

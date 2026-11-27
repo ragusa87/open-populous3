@@ -300,13 +300,16 @@ it: back on its feet, it starts over, until the building burns or is gone, it di
 The original's wood-pile arson (kind 13) is never issued there: not implemented.
 
 **Computer tribes** (ai_spy.rs): with `STATE_SABOTAGE` on, every 64 turns, idle spies up to `MAX_SPY_ATTACKS` out
-at once (the original's reading too: concurrent sabotage raids, one spy each) are each redisguised as a target's tribe and sent to burn the first
-not-burning building of a worklist: the 10 enemy buildings nearest the tribe's base (`[ours]`; the original's raid targets a random
-building of a random enemy tribe - TODO.md "Spies"). Every 32 turns (`[guess]`; not `SPY_CHECK_FREQUENCY`, which is an attack party's re-disguise period) each computer
-tribe looks for spies passing as its own anywhere: caught by a `SPY_DISCOVER_CHANCE` percent roll (45 by default,
-the live value) or for standing idle longer than `ENEMY_SPY_MAX_STAND` turns (255), unmasking every spy passing as
-it within 3 cells (`[guess]`; the original: the 3x3 cells around the spy, and only for spies inside the tribe's
-settlement area - TODO.md "Spies"). A human tribe never runs this check.
+at once (concurrent sabotage raids, one spy each, as the original) are each sent against a random building (walls
+excluded; ours also skips what cannot burn) of a random enemy tribe, redisguised as that tribe
+(`GameMap::ai_raid_target`, pop3-rev-analysis.md "Arson", sabotage raids). Every 32 turns (`[guess]`: the
+discovery task's cadence is not traced; not `SPY_CHECK_FREQUENCY`, an attack party's re-disguise period) each
+computer tribe looks for spies passing as its own inside its settlement area (`GameMap::in_settlement`: within 10
+cells of one of its buildings, or its `SET_DEFENCE_RADIUS`'s 4/6/8; read live, the original stamps it every 128
+turns): caught by a `SPY_DISCOVER_CHANCE` percent roll (45 by default, the live value) or for standing idle longer
+than `ENEMY_SPY_MAX_STAND` turns (255), unmasking every spy passing as it in the 3 × 3 cells around the caught one
+(pop3-rev-analysis.md "What un-disguises a spy"). A human tribe never runs this check. Spies marching with an
+attack party (and its 10-building worklist) are not implemented.
 
 ## Wood (done: braves only)
 - A brave carries at most one piece of wood (`Unit::carrying`, 0 or 1).

@@ -154,7 +154,21 @@ pub(crate) struct NativeAi {
     /// nothing. The wiki's "everyone retreats to guard the shaman" claim is still unconfirmed and not
     /// modelled - only the traced force-success half.
     give_up_and_sulk: bool,
+    /// `SET_DEFENCE_RADIUS`: its settlement area's radius in cells (`settlement_radius`).
+    defence_radius: i32,
 }
+
+/// The settlement area's radius (cells) around each of a tribe's buildings for a `SET_DEFENCE_RADIUS` value: 5, 7, 9
+/// give 4, 6, 8, anything else `SETTLEMENT_RADIUS` (pop3-rev-analysis.md "What un-disguises a spy" [exe]).
+pub fn settlement_radius(script_value: i32) -> i32 {
+    match script_value {
+        5 | 7 | 9 => script_value - 1,
+        _ => SETTLEMENT_RADIUS,
+    }
+}
+
+/// The settlement area's radius (cells) of a human tribe, and a computer one's by default [exe].
+pub const SETTLEMENT_RADIUS: i32 = 10;
 
 impl NativeAi {
     pub fn new(owner: TribeId) -> Self {
@@ -169,6 +183,7 @@ impl NativeAi {
             sorties: Vec::new(),
             timer_end: None,
             give_up_and_sulk: false,
+            defence_radius: SETTLEMENT_RADIUS,
         }
     }
 
@@ -323,6 +338,27 @@ impl GameMap {
         if let Some(i) = self.ai_index(owner) {
             self.ai[i].drum_tower_pos = Some(at);
         }
+    }
+
+    /// `SET_DEFENCE_RADIUS value`.
+    pub(crate) fn ai_set_defence_radius(&mut self, owner: TribeId, value: i32) {
+        if let Some(i) = self.ai_index(owner) {
+            self.ai[i].defence_radius = settlement_radius(value);
+        }
+    }
+
+    /// Whether `cell` is in `owner`'s settlement area: within its radius (`SETTLEMENT_RADIUS`, or a computer tribe's
+    /// `SET_DEFENCE_RADIUS`) of one of its buildings' cells, across the map's edge. The original stamps it on the
+    /// cells every 128 turns, standable ground only; ours reads it live `[ours]`.
+    pub(crate) fn in_settlement(&self, owner: TribeId, cell: (i32, i32)) -> bool {
+        let r = self.ai_index(owner).map_or(SETTLEMENT_RADIUS, |i| self.ai[i].defence_radius);
+        let size = self.terrain.size() as i32;
+        let d = |a: i32, b: i32| (a - b).rem_euclid(size).min((b - a).rem_euclid(size));
+        self.buildings.iter().filter(|b| b.owner == owner).any(|b| {
+            let (bx, bz) = b.centre();
+            let (dx, dz) = (d(cell.0, crate::unit::cell_of(bx)), d(cell.1, crate::unit::cell_of(bz)));
+            dx * dx + dz * dz <= r * r
+        })
     }
 
     pub(crate) fn ai_set_delay_main_drum_tower(&mut self, owner: TribeId, delay: bool) {

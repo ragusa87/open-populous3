@@ -657,7 +657,7 @@ confirmed as task 24").
   alternate two of them.
 - `SET_BASE_MARKER m` sets the centre of the base, and `SET_BASE_RADIUS r` its radius (for wildmen
   conversion). Bullfrog always calls `RESET_BASE_MARKER` (?) just before `SET_BASE_MARKER`.
-  `SET_DEFENCE_RADIUS r` sets the size of the tribe's settlement area, a disc around each of its buildings: r = 5, 7,
+  `SET_DEFENCE_RADIUS r` (done: `ai::settlement_radius`) sets the size of the tribe's settlement area, a disc around each of its buildings: r = 5, 7,
   9 give radius 4, 6, 8 cells, anything else (and the default) 10 (pop3-rev-analysis.md "What un-disguises a spy";
   it bounds the spy-discovery check and the computer's random destinations).
 - `COUNT_PEOPLE_IN_MARKER team|COUNT_WILD marker radius $v` (144 uses) and `IS_SHAMAN_IN_AREA team marker

@@ -223,6 +223,12 @@ impl Env for ScriptEnv<'_> {
                 }
                 None
             }
+            "SET_DEFENCE_RADIUS" => {
+                if let [Arg::Field(r)] = call.args[..] {
+                    self.map.ai_set_defence_radius(self.owner, field_i32(r));
+                }
+                None
+            }
             "DELAY_MAIN_DRUM_TOWER" => {
                 self.map.ai_set_delay_main_drum_tower(self.owner, true);
                 None

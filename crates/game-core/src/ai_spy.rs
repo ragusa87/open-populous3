@@ -4,33 +4,27 @@
 
 use crate::building::BuildingId;
 use crate::command::Command;
-use crate::map::{GameMap, torus_dist2};
+use crate::map::GameMap;
 use crate::time::Every;
 use crate::tribes::TribeId;
 use crate::unit::{Action, Order, UnitId, UnitKind};
 use pop3_ai_script::field::InternalVar;
 
-/// `INT_ATTR_MAX_SPY_ATTACKS`: read here as how many of its spies may be out setting fires at once. `[guess]`
-/// mapping, ai-scripts.md only says "spy handling".
+/// `INT_ATTR_MAX_SPY_ATTACKS`: how many sabotage raids (one spy each) it runs at once (pop3-rev-analysis.md
+/// "Arson", sabotage raids [exe]).
 pub(crate) const MAX_SPY_ATTACKS: InternalVar = InternalVar(1023);
 /// `INT_ATTR_ENEMY_SPY_MAX_STAND`: a spy idle longer than this in turns is caught for sure (live 255).
 pub(crate) const ENEMY_SPY_MAX_STAND: InternalVar = InternalVar(1024);
 /// `INT_ATTR_SPY_DISCOVER_CHANCE`: percent chance to catch each spy on a check (live 45).
 pub(crate) const SPY_DISCOVER_CHANCE: InternalVar = InternalVar(1040);
-/// The worklist of target buildings is at most this long [exe].
-const WORKLIST: usize = 10;
-/// How often a tribe tasks its spies: with its other priorities. `[guess]`
+/// How often a tribe starts sabotage raids: its "decide on a new goal" pass, about every 64 turns [exe].
 const TASK_EVERY: Every = Every::new(64);
-/// How often a tribe looks for spies passing as its own. `INT_ATTR_SPY_CHECK_FREQUENCY` is not read: its unit is
-/// unknown. `[guess]`
+/// How often a tribe looks for spies passing as its own: the discovery task's cadence is not traced. `[guess]`
+/// (`INT_ATTR_SPY_CHECK_FREQUENCY` is an attack party's re-disguise period, not this.)
 const CHECK_EVERY: Every = Every::new(32);
-/// Cells around a caught spy within which every other spy passing as the tribe is unmasked too. `[guess]`
-const SWEEP_CELLS: i32 = 3;
-
-/// The first of `worklist` (nearest first) not already burning.
-pub fn pick_target(worklist: &[(BuildingId, bool)]) -> Option<BuildingId> {
-    worklist.iter().find(|&&(_, burning)| !burning).map(|&(id, _)| id)
-}
+/// Cells around a caught spy within which every other spy passing as the tribe is unmasked too: its 3 × 3 cells
+/// ("What un-disguises a spy" [exe]).
+const SWEEP_CELLS: i32 = 1;
 
 /// Whether a spy passing as the checking tribe is caught: the roll under `chance` percent, or standing idle longer
 /// than `max_stand` turns.
@@ -54,18 +48,21 @@ impl GameMap {
         }
     }
 
-    /// Enemy buildings that can burn, nearest the tribe's base first, at most `WORKLIST` of them, with whether they
-    /// burn already. The original keeps its own worklist, whose filling was not traced: nearest is `[ours]`.
-    fn ai_spy_worklist(&self, owner: TribeId) -> Vec<(BuildingId, bool)> {
-        let base = self.ai_base(owner).unwrap_or((0, 0));
-        let mut list: Vec<_> = self
+    /// A sabotage raid's target ("Arson", sabotage raids [exe]): a random enemy tribe, then a random one of its
+    /// buildings, walls excluded (and, ours, what a spy cannot set on fire: fireproof, a plan, burning already).
+    fn ai_raid_target(&mut self, owner: TribeId) -> Option<BuildingId> {
+        let enemies: Vec<TribeId> = self.tribes.all().filter(|&t| t != owner && !self.tribes.same_team(t, owner)).collect();
+        if enemies.is_empty() {
+            return None;
+        }
+        let tribe = enemies[self.rng.next_u32() as usize % enemies.len()];
+        let targets: Vec<BuildingId> = self
             .buildings
             .iter()
-            .filter(|b| b.owner.tribe().is_some() && !self.tribes.same_team(b.owner, owner) && !b.kind.fireproof() && b.stage() != crate::building::Stage::Blueprint)
-            .map(|b| (torus_dist2(base, b.centre()), b.id, b.burning.is_some()))
+            .filter(|b| b.owner == tribe && b.kind != crate::building::BuildingKind::WallPiece && !b.kind.fireproof() && b.burning.is_none() && b.stage() != crate::building::Stage::Blueprint)
+            .map(|b| b.id)
             .collect();
-        list.sort();
-        list.into_iter().take(WORKLIST).map(|(_, id, burning)| (id, burning)).collect()
+        (!targets.is_empty()).then(|| targets[self.rng.next_u32() as usize % targets.len()])
     }
 
     fn ai_task_spies(&mut self, owner: TribeId) {
@@ -79,7 +76,7 @@ impl GameMap {
             .take(room)
             .collect();
         for spy in idle {
-            let Some(target) = pick_target(&self.ai_spy_worklist(owner)) else { return };
+            let Some(target) = self.ai_raid_target(owner) else { continue };
             let Some(tribe) = self.building(target).and_then(|b| b.owner.tribe()) else { continue };
             if self.unit(spy).and_then(|u| u.statuses.disguise).map(|d| d.apparent) != Some(tribe) {
                 self.apply(&Command::OrderUnit { player: owner, unit: spy, order: Order::Disguise { tribe } });
@@ -88,11 +85,12 @@ impl GameMap {
         }
     }
 
-    /// Other tribes' spies passing as `owner`'s people: each caught by a roll or for loitering unmasks every one
-    /// passing as `owner` within `SWEEP_CELLS` of it. Never a non-spy: only a disguise can pass as `owner`.
+    /// Other tribes' spies passing as `owner`'s people inside its settlement area (`in_settlement`): each caught by
+    /// a roll or for loitering unmasks every one passing as `owner` within `SWEEP_CELLS` of it. Never a non-spy:
+    /// only a disguise can pass as `owner`.
     fn ai_find_spies(&mut self, owner: TribeId) {
         let (chance, max_stand) = (self.ai_attr(owner, SPY_DISCOVER_CHANCE), self.ai_attr(owner, ENEMY_SPY_MAX_STAND));
-        let suspects: Vec<usize> = (0..self.units.len()).filter(|&i| self.units[i].is_alive() && self.units[i].fools(owner)).collect();
+        let suspects: Vec<usize> = (0..self.units.len()).filter(|&i| self.units[i].is_alive() && self.units[i].fools(owner) && self.in_settlement(owner, self.units[i].cell())).collect();
         for i in suspects {
             if !self.units[i].fools(owner) {
                 continue;
@@ -120,13 +118,6 @@ mod tests {
     use crate::ai::{NativeAi, state};
     use crate::building::{Building, BuildingKind};
     use crate::time::Ticks;
-
-    #[test]
-    fn the_first_target_not_already_burning() {
-        let (a, b) = (BuildingId::from_raw(1), BuildingId::from_raw(2));
-        assert_eq!(pick_target(&[(a, true), (b, false)]), Some(b));
-        assert_eq!(pick_target(&[(a, true)]), None);
-    }
 
     #[test]
     fn caught_by_the_roll_or_for_loitering() {
@@ -164,6 +155,40 @@ mod tests {
     }
 
     #[test]
+    fn only_inside_its_settlement_area_and_the_sweep_takes_the_3x3_cells_around_the_caught_one() {
+        let (mut map, _) = red_ai_and_blue_hut();
+        map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 64 * 512, 54 * 512, 0));
+        let spy = |map: &mut GameMap, cell: (u16, u16)| {
+            let id = map.spawn(TribeId::Blue, UnitKind::Spy, (cell.0 * 512 + 256, cell.1 * 512 + 256)).id;
+            map.unit_mut(id).unwrap().disguise_as(TribeId::Red, Ticks::ZERO);
+            id
+        };
+        let far = spy(&mut map, (60, 66));
+        let caught = spy(&mut map, (64, 60));
+        let beside = spy(&mut map, (64, 61));
+        map.ai_set_attr(TribeId::Red, SPY_DISCOVER_CHANCE, 0);
+        map.ai_set_attr(TribeId::Red, ENEMY_SPY_MAX_STAND, 100_000);
+        map.ai_set_defence_radius(TribeId::Red, 7);
+        assert!(map.in_settlement(TribeId::Red, (64, 60)) && !map.in_settlement(TribeId::Red, (64, 61)), "radius 6");
+        map.unit_mut(caught).unwrap().action = Action::Idle;
+        map.ai_set_attr(TribeId::Red, ENEMY_SPY_MAX_STAND, -1);
+        map.run(Ticks::new(CHECK_EVERY.period()));
+        assert!(!map.unit(caught).unwrap().disguised(), "loitering in its area");
+        assert!(!map.unit(beside).unwrap().disguised(), "in the 3 x 3 cells around it, though outside the area");
+        assert!(map.unit(far).unwrap().disguised(), "outside every disc: never rolled for");
+        assert_eq!(crate::ai::settlement_radius(9), 8);
+        assert_eq!(crate::ai::settlement_radius(24), crate::ai::SETTLEMENT_RADIUS);
+    }
+
+    #[test]
+    fn a_raid_goes_for_a_building_of_an_enemy_tribe_never_a_wall() {
+        let (mut map, hut) = red_ai_and_blue_hut();
+        map.add_building(Building::new(BuildingKind::WallPiece, TribeId::Blue, 80 * 512, 80 * 512, 0));
+        map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 40 * 512, 40 * 512, 0));
+        assert!((0..50).all(|_| map.ai_raid_target(TribeId::Red) == Some(hut)));
+    }
+
+    #[test]
     fn no_more_spies_out_than_its_max_spy_attacks() {
         let (mut map, _) = red_ai_and_blue_hut();
         let spies: Vec<UnitId> = (0..3).map(|k| map.spawn(TribeId::Red, UnitKind::Spy, (62 * 512, (66 + k) * 512)).id).collect();
@@ -176,6 +201,7 @@ mod tests {
     #[test]
     fn it_unmasks_a_spy_passing_as_its_own_never_one_passing_as_another_tribe() {
         let (mut map, _) = red_ai_and_blue_hut();
+        map.add_building(Building::new(BuildingKind::Hut { size: 1 }, TribeId::Red, 60 * 512, 64 * 512, 0));
         map.ai_set_attr(TribeId::Red, SPY_DISCOVER_CHANCE, 100);
         let as_red = map.spawn(TribeId::Blue, UnitKind::Spy, (64 * 512, 64 * 512)).id;
         map.unit_mut(as_red).unwrap().disguise_as(TribeId::Red, Ticks::ZERO);
