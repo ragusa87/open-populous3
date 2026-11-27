@@ -333,6 +333,27 @@ impl Plugin for KeymapPlugin {
     }
 }
 
+/// What Space does, the first that applies, as the original's ordered bindings (pop3-rev-analysis.md "Player input:
+/// the keymap and HUD clicks" [exe]): turn the held plan, else skip an interruptible fly-by, else (dev mode) look at
+/// the shaman. The original's next two, the level status once won or lost and the camera to the combat alert, have
+/// nothing here yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpaceAction {
+    TurnPlan,
+    SkipFlyby,
+    Other,
+}
+
+pub fn space_action(plan_held: bool, flyby_skippable: bool) -> SpaceAction {
+    if plan_held {
+        SpaceAction::TurnPlan
+    } else if flyby_skippable {
+        SpaceAction::SkipFlyby
+    } else {
+        SpaceAction::Other
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,5 +447,12 @@ mod tests {
         assert_eq!(DevMode::from_env(None), DevMode(true));
         assert_eq!(DevMode::from_env(Some("1")), DevMode(true));
         assert_eq!(DevMode::from_env(Some("0")), DevMode(false));
+    }
+
+    #[test]
+    fn space_turns_the_plan_first_then_skips_the_flyby() {
+        assert_eq!(space_action(true, true), SpaceAction::TurnPlan);
+        assert_eq!(space_action(false, true), SpaceAction::SkipFlyby);
+        assert_eq!(space_action(false, false), SpaceAction::Other);
     }
 }

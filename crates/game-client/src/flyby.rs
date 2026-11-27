@@ -229,10 +229,16 @@ fn banner(map: Res<CurrentMap>, time: Res<Time>, mut q: Query<(&mut Text, &mut V
     }
 }
 
-/// Space, while a flyby is playing and interruptible: issues `Command::CancelFlyby`
-/// (`units::select_and_order`'s pattern for turning player input into a command).
-fn cancel_input(keys: Shortcuts, map: Res<CurrentMap>, mut schedule: ResMut<GameSchedule>) {
-    if keys.just_pressed(Shortcut::CancelFlyby) && let Some(active) = &map.0.active_flyby && active.flyby.allow_interrupt && active.interrupted_at.is_none() {
+/// Whether the playing flyby can be skipped now.
+pub fn skippable(map: &game_core::map::GameMap) -> bool {
+    map.active_flyby.as_ref().is_some_and(|a| a.flyby.allow_interrupt && a.interrupted_at.is_none())
+}
+
+/// Space, while a flyby is playing and interruptible and no plan is held (`keymap::space_action`): issues
+/// `Command::CancelFlyby` (`units::select_and_order`'s pattern for turning player input into a command).
+fn cancel_input(keys: Shortcuts, map: Res<CurrentMap>, blueprint: Res<crate::blueprint::Blueprint>, mut schedule: ResMut<GameSchedule>) {
+    let action = crate::keymap::space_action(blueprint.is_active(), skippable(&map.0));
+    if keys.just_pressed(Shortcut::CancelFlyby) && action == crate::keymap::SpaceAction::SkipFlyby {
         schedule.issue(Command::CancelFlyby { player: PLAYER });
     }
 }

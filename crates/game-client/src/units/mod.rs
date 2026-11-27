@@ -667,9 +667,10 @@ pub(crate) fn run_ticks(
     }
 }
 
-/// Space looks at her, unless it turns a blueprint (`blueprint`).
+/// Space looks at her when nothing before it applies (`keymap::space_action`: turning a plan, skipping a flyby).
 fn look_at_shaman(keys: crate::keymap::Shortcuts, mut rig: ResMut<CameraRig>, map: Res<CurrentMap>, clock: Res<SimClock>, blueprint: Res<crate::blueprint::Blueprint>) {
-    if keys.just_pressed(crate::keymap::Shortcut::LookAtShaman) && !blueprint.is_active() && let Some(cell) = player_shaman_cell(&map.0, &clock) {
+    let other = crate::keymap::space_action(blueprint.is_active(), crate::flyby::skippable(&map.0)) == crate::keymap::SpaceAction::Other;
+    if keys.just_pressed(crate::keymap::Shortcut::LookAtShaman) && other && let Some(cell) = player_shaman_cell(&map.0, &clock) {
         rig.fly_to(cell);
     }
 }
