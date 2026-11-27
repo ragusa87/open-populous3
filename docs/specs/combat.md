@@ -18,8 +18,13 @@ pop3-rev-analysis.md (sections named below); the names here are ours. Tags: **[e
 | firewarrior | 700 | 6 |
 | wildman | 32 (the exe's own, no `LIFE_` constant: pop3-rev-analysis.md "Starting and maximum life") | never |
 
+- Each new person (`GameMap::spawn`, a level's shamans, a reincarnated shaman, a convert) gets its own full life,
+  rolled once with the game's random draws (`Health::at_birth`, pop3-rev-analysis.md "Starting and maximum life"
+  [exe, measured]): `life × 3/4 + roll % (life / 4)` for a kind that heals (a brave 750-999, a shaman 1500-1999),
+  the full life for a wildman or an angel. The kind's life is the live `Balance`'s (`LIFE_<P>` from the install's
+  `constant.dat` when one is loaded).
 - Everyone heals on every eighth turn of the game (`unit::HEAL_EVERY`, phase 0: the same turn for all) [exe],
-  whatever it does, fighting included; not in the air, drowning, stranded or dead.
+  whatever it does, fighting and stranded included; not in the air, drowning or dead.
 - Past full by up to one heal [exe]: the original adds the heal while below full with no clamp, so life can end up
   over max by up to one heal's worth; the next heal tick then takes the already-full branch (`Health::heal_past_max`).
 - In the air, a deadly hit does not kill at once: the unit flies on and dies on landing [exe].

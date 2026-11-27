@@ -333,7 +333,7 @@ impl GameMap {
     fn revive_shamans(&mut self) {
         let sites: Vec<_> = self.sites.iter().filter(|s| s.enabled).cloned().collect();
         for site in sites {
-            let life = crate::health::Health::full(self.balance.units.life(UnitKind::Shaman));
+            let life = self.birth_life(UnitKind::Shaman);
             match self.units.iter_mut().find(|u| u.owner == Owner::Tribe(site.owner) && u.kind == UnitKind::Shaman && !u.statuses.ghost) {
                 Some(u) if u.is_alive() => {}
                 Some(u) => u.revive_at(&site, life),
@@ -447,7 +447,8 @@ mod tests {
         map.run(Ticks::new(3));
         assert!([TribeId::Blue, TribeId::Red].iter().all(|&t| cells_off(&map, her(&map, t)) <= ARENA_HALF_CELLS), "the first to arrive");
         assert_eq!(her(&map, TribeId::Red).id, red, "the same shaman, not a new one");
-        assert_eq!(her(&map, TribeId::Red).health.current(), map.balance.units.life(UnitKind::Shaman));
+        let (life, h) = (map.balance.units.life(UnitKind::Shaman), her(&map, TribeId::Red).health);
+        assert!(h.is_full() && (life * 3 / 4..life).contains(&h.max()), "whole again, her life rolled anew: {h:?}");
         assert!(map.sites.iter().all(|s| !s.enabled), "no site left, their stones gone with them");
     }
 

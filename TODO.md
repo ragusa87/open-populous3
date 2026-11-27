@@ -216,7 +216,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   code at all. Also checked: a pyramid of knowledge (`BuildingKind::Vault`)'s own footprint is an ordinary
   rectangle, same as any other building, no special corner handling needed or missing found - no evidence of
   a pyramid-specific pathing bug; needs a more specific repro (level, position) to look at further.
-- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values, which are the ones the original runs on). Traced (pop3-rev-analysis.md "Starting and maximum life", "Stranded"): roll each person's maximum and starting life once at birth in [3/4, 1) of the kind's life (the game generator; ours gives everyone the full value); stranding follows the trace (`GameMap::tend_stranded`). Drowning already follows the trace (a flat 16 turns whatever the health, `DROWN_SINK`/`DROWN_DEPTH`, pop3-rev-analysis.md "Drowning").
+- [x] Health (pop3-rev-analysis.md "Starting and maximum life", "Stranded", "Drowning"): the lives are read from `constant.dat` (`Balance::apply_constants`), each new person's life is rolled at birth (`Health::at_birth`), stranding and drowning follow the trace.
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).

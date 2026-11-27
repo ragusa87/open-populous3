@@ -12,6 +12,18 @@ impl Health {
         Health { current: max, max }
     }
 
+    /// A new person's full life, rolled from its kind's `life` (pop3-rev-analysis.md "Starting and maximum life"
+    /// [exe, measured]): `life × 3/4 + roll % (life / 4)` for a kind that `heals`, the full `life` for one that
+    /// does not (a wildman, an angel).
+    pub fn at_birth(life: u16, heals: bool, roll: u32) -> Self {
+        if !heals {
+            return Health::full(life);
+        }
+        let quarter = (life / 4) as u32;
+        let max = life as u32 * 3 / 4 + if quarter == 0 { 0 } else { roll % quarter };
+        Health::full(max as u16)
+    }
+
     /// `current` capped at `max`.
     pub fn new(current: u16, max: u16) -> Self {
         Health { current: current.min(max), max }
@@ -67,6 +79,15 @@ mod tests {
         assert!(Health::new(250, 1000).is_low(), "a quarter exactly");
         assert!(Health::new(0, 1000).is_low());
         assert!(!Health::full(1000).is_low());
+    }
+
+    #[test]
+    fn a_new_person_s_life_is_rolled_in_the_top_quarter_unless_it_never_heals() {
+        assert_eq!(Health::at_birth(1000, true, 0), Health::full(750));
+        assert_eq!(Health::at_birth(1000, true, 249), Health::full(999));
+        assert_eq!(Health::at_birth(1000, true, 250), Health::full(750), "wraps");
+        assert_eq!(Health::at_birth(2000, true, 7), Health::full(1507));
+        assert_eq!(Health::at_birth(32, false, 5), Health::full(32));
     }
 
     #[test]

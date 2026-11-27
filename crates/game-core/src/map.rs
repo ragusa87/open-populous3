@@ -186,6 +186,11 @@ fn per_player<T: Clone>(t: T) -> Vec<T> {
     vec![t; TRIBES]
 }
 
+/// A new person's life of `kind` from `balance`, its roll from `rng` (`GameMap::birth_life`).
+fn birth_life(balance: &crate::balance::Balance, kind: UnitKind, rng: &mut Lcg) -> crate::health::Health {
+    crate::health::Health::at_birth(balance.units.life(kind), kind.stats().heal.is_some(), rng.next_u32())
+}
+
 impl GameMap {
     /// `terrain` and `sites` with nothing else on them yet (generated maps, sandboxes). `tribes` (its roster, not
     /// its alliances, which these maps have no header to set) comes straight from `sites`: 1:1 for every map built
@@ -348,7 +353,7 @@ impl GameMap {
             } else {
                 self.sites[k].flatten_for_spawn(&mut self.terrain);
             }
-            shaman.health = crate::health::Health::full(self.balance.units.shaman);
+            shaman.health = self.birth_life(UnitKind::Shaman);
             self.units.push(shaman);
         }
         self
@@ -1673,7 +1678,10 @@ impl GameMap {
             match event {
                 // An animated site's ground isn't levelled on reincarnation itself any more: the build
                 // ritual grows it, tick by tick, over its own levelling state (`UnitEvent::SiteLevelling`).
-                Some(UnitEvent::Reincarnated) => dirty.extend(site.filter(|s| !s.animated).map(|s| s.flatten_for_spawn(&mut self.terrain))),
+                Some(UnitEvent::Reincarnated) => {
+                    unit.health = birth_life(&self.balance, unit.kind, &mut self.rng);
+                    dirty.extend(site.filter(|s| !s.animated).map(|s| s.flatten_for_spawn(&mut self.terrain)));
+                }
                 Some(UnitEvent::SiteLevelling { done, total }) => {
                     dirty.extend(site.map(|s| s.level_growing(&mut self.terrain, done, total)));
                     levelling.extend(site.map(|s| (s.owner, done)));
@@ -1819,11 +1827,15 @@ impl GameMap {
     pub fn spawn(&mut self, owner: impl Into<Owner>, kind: UnitKind, at: (u16, u16)) -> &mut Unit {
         let id = self.new_id_of();
         let mut unit = Unit::new(id, owner, kind, at);
-        // `Unit::new`'s own health is `KindStats::life`, our compiled-in default - corrected here against
-        // the live `balance` (`Balance::apply_constants`, a real install's own `LIFE_<P>` if one loaded).
-        unit.health = crate::health::Health::full(self.balance.units.life(kind));
+        unit.health = self.birth_life(kind);
         self.units.push(unit);
         self.units.last_mut().unwrap()
+    }
+
+    /// A new person's life (`Health::at_birth`): rolled from the live `balance`'s life for `kind` (a real install's
+    /// own `LIFE_<P>` if one loaded) with the game's own random draws, as the original's every new person.
+    pub(crate) fn birth_life(&mut self, kind: UnitKind) -> crate::health::Health {
+        birth_life(&self.balance, kind, &mut self.rng)
     }
 
     /// Where the unit `id` is in `units`; None once it has left the map.
@@ -2838,11 +2850,14 @@ mod tests {
     }
 
     #[test]
-    fn spawn_gives_a_new_unit_the_live_balances_own_life_not_just_kind_statss_default() {
+    fn spawn_rolls_a_new_unit_s_life_from_the_live_balance_s_own() {
         let mut map = GameMap::sandbox_walk();
-        map.balance.units.warrior = 42;
-        let id = map.spawn(TribeId::Blue, UnitKind::Warrior, (10 * 512, 10 * 512)).id;
-        assert_eq!(map.unit(id).unwrap().health.max(), 42, "not UnitKind::Warrior.max_health()'s compiled-in 1800");
+        map.balance.units.warrior = 400;
+        let lives: Vec<u16> = (0..20).map(|_| { let id = map.spawn(TribeId::Blue, UnitKind::Warrior, (10 * 512, 10 * 512)).id; map.unit(id).unwrap().health.max() }).collect();
+        assert!(lives.iter().all(|l| (300..400).contains(l)), "in [3/4, 1) of 400, not the compiled-in 1800: {lives:?}");
+        assert!(lives.windows(2).any(|w| w[0] != w[1]), "rolled per person");
+        let wildman = map.spawn(Owner::Wild, UnitKind::Wildman, (10 * 512, 10 * 512)).id;
+        assert_eq!(map.unit(wildman).unwrap().health.max(), 32, "never heals: no roll");
     }
 
     #[test]

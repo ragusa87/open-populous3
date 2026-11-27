@@ -233,10 +233,10 @@ pub(crate) mod tests {
         let units = braves(&mut map, 2);
         map.unit_mut(units[1]).unwrap().statuses.shield = crate::status::Timed::steps(crate::status::SHIELD_STEPS);
         gather(&mut map, &units, 5, true, false);
-        let max = map.unit(units[0]).unwrap().health.max();
         map.tick();
-        assert!(map.unit(units[0]).unwrap().health.current() < max);
-        assert_eq!(map.unit(units[1]).unwrap().health.current(), max, "shielded");
+        let hurt = |i: usize| { let h = map.unit(units[i]).unwrap().health; h.current() < h.max() };
+        assert!(hurt(0));
+        assert!(!hurt(1), "shielded");
     }
 
     #[test]

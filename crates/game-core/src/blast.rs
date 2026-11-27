@@ -385,11 +385,11 @@ mod tests {
         map.add_effect(effect(TribeId::Blue, at));
         map.run(Ticks::new(RADII.len() as u32));
         assert!(map.effects.is_empty());
-        let health = |id| map.unit(id).unwrap().health.current();
-        assert_eq!(health(enemy), 1000 - 3 * DAMAGE_PERSON);
-        assert_eq!(health(mine), 1000, "the caster's brave is not hurt");
+        let lost = |id| { let h = map.unit(id).unwrap().health; h.max() - h.current() };
+        assert_eq!(lost(enemy), 3 * DAMAGE_PERSON);
+        assert_eq!(lost(mine), 0, "the caster's brave is not hurt");
         assert!(map.unit(mine).unwrap().motion.airborne(), "but pushed (on the last turn, as an ally)");
-        assert_eq!(health(shielded), 1000);
+        assert_eq!(lost(shielded), 0);
         assert!(!map.unit(shielded).unwrap().motion.airborne(), "nor pushed");
     }
 

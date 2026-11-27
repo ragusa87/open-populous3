@@ -174,14 +174,12 @@ impl GameMap {
     /// its kind and place and starts afresh (`Unit::change_owner`). A ghost can't be converted (docs/plans/ghost.md):
     /// destroyed outright instead.
     pub(crate) fn change_owner(&mut self, unit: UnitId, tribe: TribeId) {
-        let balance = self.balance;
         if self.unit(unit).is_some_and(|u| u.is_alive() && u.statuses.ghost) {
             self.destroy_ghost(unit);
-        } else if let Some(u) = self.unit_mut(unit).filter(|u| u.is_alive()) {
-            u.change_owner(tribe);
-            // `Unit::change_owner`'s own health reset is `KindStats::life`, our compiled-in default -
-            // corrected here against the live `balance`, the same as `GameMap::spawn`.
-            u.health = crate::health::Health::full(balance.units.life(u.kind));
+        } else if let Some(i) = self.unit_index(unit).filter(|&i| self.units[i].is_alive()) {
+            self.units[i].change_owner(tribe);
+            // The original makes a new person of the convert: its life rolled like any newborn's.
+            self.units[i].health = self.birth_life(self.units[i].kind);
         }
     }
 }
@@ -216,11 +214,11 @@ mod tests {
     #[test]
     fn change_owner_uses_the_live_balances_own_life_for_a_wildman_turned_brave() {
         let mut map = GameMap::sandbox_units().seeded(11);
-        map.balance.units.brave = 42;
+        map.balance.units.brave = 400;
         let wildman = map.spawn(Owner::Wild, UnitKind::Wildman, (10 * 512, 10 * 512)).id;
         map.change_owner(wildman, TribeId::Blue);
         let u = map.unit(wildman).unwrap();
-        assert_eq!((u.kind, u.health.max()), (UnitKind::Brave, 42), "not UnitKind::Brave.max_health()'s compiled-in 1000");
+        assert!(u.kind == UnitKind::Brave && (300..400).contains(&u.health.max()) && u.health.is_full(), "a new brave's rolled life, not the compiled-in 1000: {:?}", u.health);
     }
 
     #[test]
