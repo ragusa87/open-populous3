@@ -4,7 +4,8 @@
 
 use crate::sim_time::{progress, SimNow};
 use game_core::effect::DamageKind;
-use game_core::time::{Tick, Ticks};
+use game_core::map::Lcg;
+use game_core::time::{Tick, Ticks, TICKS_PER_SECOND};
 use game_core::idle;
 use game_core::unit::{Action, UnitId, UnitKind};
 use pop3_format::anim::{AnimBank, Outfit, SPRITE_FILE};
@@ -405,6 +406,32 @@ pub fn set_fire_frame(stage: game_core::arson::Stage, bending: usize, now: SimNo
     }
 }
 
+/// Turns into the current hammer swing `elapsed` turns into a building stint, for a brave of `id`
+/// (pop3-rev-analysis.md "The hammering pose" [exe]): one swing of the axe (anim 11) every `16 + rand & 15` turns,
+/// each cycle's length seeded by the id and the cycle.
+pub fn hammer_turn(elapsed: u32, id: u32) -> u32 {
+    let (mut t, mut n) = (elapsed, 0u32);
+    loop {
+        let period = HAMMER_EVERY + Lcg(id.wrapping_mul(2_654_435_761) ^ n.wrapping_mul(0x85EB_CA6B)).next_u32() % HAMMER_SPREAD;
+        if t < period {
+            return t;
+        }
+        (t, n) = (t - period, n + 1);
+    }
+}
+
+/// The hammer pose's frame (of `frames`) `turn` turns into its swing (`hammer_turn`): the swing once, at the pose's
+/// rate, then still on its first frame until the next.
+pub fn hammer_frame(frames: usize, turn: u32) -> usize {
+    let per_frame = (TICKS_PER_SECOND as f32 / Pose::Hammer.fps()).round().max(1.0) as u32;
+    let k = (turn / per_frame) as usize;
+    if k < frames { k } else { 0 }
+}
+
+/// A building brave swings its axe once every `HAMMER_EVERY` to `HAMMER_EVERY + HAMMER_SPREAD - 1` turns [exe].
+pub const HAMMER_EVERY: u32 = 16;
+pub const HAMMER_SPREAD: u32 = 16;
+
 pub fn frame_index(pose: Pose, frames: usize, action: &Action, now: SimNow, alpha: f32) -> usize {
     if frames == 0 {
         return 0;
@@ -538,7 +565,7 @@ pub fn original_anim(kind: UnitKind, pose: Pose, tribe: u8) -> (usize, Option<Ou
                 Pose::CarryWalk => PersonAnim::CarryWalk,
                 Pose::CarryIdle => PersonAnim::CarryStand,
                 Pose::Jump => PersonAnim::ArmsUp,
-                // No hammering anim identified yet: the axe swing stands in.
+                // The original's hammering is the axe swing itself (pop3-rev-analysis.md "The hammering pose").
                 Pose::Hammer => PersonAnim::Chop,
                 Pose::Strike => PersonAnim::Strike,
                 Pose::Trade => PersonAnim::Trade,
@@ -776,7 +803,7 @@ mod tests {
         assert_eq!(original_anim(UnitKind::Brave, Pose::Jump, 1), (12, None, None), "the whole flattening jump");
         assert_eq!(pose_for(&Action::Flattening { at: (0, 0), left: game_core::time::Countdown::new(game_core::time::Ticks::new(3)) }, false, false), Pose::Jump);
         assert_eq!(pose_for(&Action::Hammering, false, false), Pose::Hammer);
-        assert_eq!(original_anim(UnitKind::Brave, Pose::Hammer, 0).0, 11, "the axe swing stands in");
+        assert_eq!(original_anim(UnitKind::Brave, Pose::Hammer, 0).0, 11, "the axe swing is the hammering");
         let melee = |stance| Action::Melee { melee: game_core::id::Id::from_raw(1), place: (0, 0), stance };
         let left = game_core::time::Countdown::new(game_core::time::Ticks::new(6));
         assert_eq!(pose_for(&melee(game_core::melee::Stance::Striking { blow: game_core::combat::Blow::Clean, left }), false, false), Pose::Kick);
@@ -861,5 +888,13 @@ mod tests {
         let p = Picture { sprite: pop3_format::Sprite { width: 2, height: 1, pixels: vec![Some(1), None] }, origin: (1, 1) };
         let f = picture_frame(&p, &[[0, 0, 0], [9, 8, 7]]);
         assert_eq!(f.rgba, vec![9, 8, 7, 255, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_swing_every_16_to_31_turns_still_between() {
+        let starts: Vec<u32> = (0..2000).filter(|&t| hammer_turn(t, 7) == 0).collect();
+        let gaps: Vec<u32> = starts.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(gaps.iter().all(|g| (16..32).contains(g)) && gaps.iter().any(|&g| g != gaps[0]), "{gaps:?}");
+        assert_eq!((hammer_frame(5, 0), hammer_frame(5, 3), hammer_frame(5, 9), hammer_frame(5, 10)), (0, 1, 4, 0), "2 turns a frame, then still");
     }
 }

@@ -144,7 +144,8 @@ pub fn turn_cue(unit: &Unit, now: Tick, draw: u64) -> Option<SoundCue> {
         Action::Idle if unit.kind == UnitKind::Wildman => (draw % MUTTER_ODDS == 0).then_some(SoundCue::Mutter),
         Action::Chopping { .. } | Action::Hacking { .. } if beat => Some(SoundCue::Chop),
         Action::PickingUpWood { .. } if beat => Some(SoundCue::ChopPickUp),
-        Action::Building { .. } | Action::Hammering if beat => Some(SoundCue::Hammer),
+        Action::Building { left } if crate::units::art::hammer_turn(left.done().get(), unit.id.raw()) == 1 => Some(SoundCue::Hammer),
+        Action::Hammering if beat => Some(SoundCue::Hammer),
         Action::Flattening { .. } if beat => Some(SoundCue::Stomp),
         _ => None,
     }

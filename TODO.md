@@ -692,7 +692,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   (currently unimplemented) "a unit already standing on a new site's footprint is moved to the nearest free cell"
   design note already describes for a related case.
 - [ ] CC0 sheets: a jump pose for flattening (`Pose::Jump` falls back on arms up) and a hammer pose (`Pose::Hammer` falls back on idle).
-- [ ] Find the original hammering anim (the axe swing, anim 11, stands in for `Pose::Hammer`). **Traced** (pop3-rev-analysis.md "The hammering pose"): the original has no other hammer animation, a building brave plays anim 11 itself (the axe swing, action 6 of the animation table, the same as chopping), facing the site, with sound 0x14, one cycle every 16-31 turns (1.3-2.6 s); with no building yet it stands idle 8-15 turns. Left for us: keep anim 11 as the hammer pose for good (drop "stand-in" wording and the CC0 hammer-sheet need), and match the 16-31-turn swing rhythm.
+- [x] Hammering (pop3-rev-analysis.md "The hammering pose"): anim 11 is the original's hammering itself, swung once every 16-31 turns with its sound (`art::hammer_turn`). Left: standing idle 8-15 turns while the plan has no building yet (ours only builds once it has).
 - [x] Huts: auto-housing of idle braves implemented (huts-and-training.md rule 3, `GameMap::tend_auto_housing`,
   `enter.rs`): still open from this item - breeding (done separately, `hut_growth.rs`), mana from people inside.
   **Eject implemented, 2026-11-10** (user question: is "selection + Shift + click a building dispatches to a

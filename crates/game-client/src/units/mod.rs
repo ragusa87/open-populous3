@@ -266,6 +266,7 @@ impl UnitSprites {
         let frame = match bored {
             Some(b) => b.frame(shown).min(frames.len().saturating_sub(1)),
             None if let Some(turns) = kneeling => worship::prayer_frame(frames.len(), turns, unit.id.raw()),
+            None if let (Pose::Hammer, game_core::unit::Action::Building { left }) = (pose, unit.action) => art::hammer_frame(frames.len(), art::hammer_turn(left.done().get(), unit.id.raw())),
             None if pose == Pose::Pedal && still => 0,
             None => frame_index(pose, frames.len(), &unit.action, now, clock.alpha()),
         };
