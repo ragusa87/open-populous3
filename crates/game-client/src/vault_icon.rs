@@ -32,6 +32,8 @@ use std::path::Path;
 /// Buildings scale as the pyramid is.
 const ICON_HEIGHT: f32 = 1072.0;
 const HEIGHT_UNITS_PER_CELL: f32 = 256.0;
+/// The icon's height over the vault's ground, cells.
+pub const ICON_CELLS: f32 = ICON_HEIGHT / HEIGHT_UNITS_PER_CELL;
 const GLOW_BELOW: f32 = 80.0;
 const GLOW_SPRITES: std::ops::RangeInclusive<usize> = 1417..=1432;
 const GLOW_LOOP: Ticks = Ticks::millis(500);

@@ -11,6 +11,8 @@
 //! `EDITOR_BRUSH=x,z:radius` turns on the world editor (`editor.rs`) and pins its brush ring at map
 //! position x,z (cells) with that radius, for a headless shot of it.
 //! `VAULT=progress:N|granted:T|spent` puts every pyramid of knowledge in that phase.
+//! `DISCOVER=spell:<name>[:ticks]|building:<name>[:ticks]` gives the player that discovery from the first pyramid
+//! (else the shaman), its cinematic `ticks` in.
 //! `EXPLODE=building:N` blows up building N (its index), as if `EXPLODE_TICKS` ticks ago (0 by default; with
 //! `GAME_SPEED=0` the shot holds it there): the explosion is drawn, then the building removed the next frame.
 //! `SPY=disguise:<tribe>[:ticks]` puts a disguised spy of the player and another tribe's spy disguised as the player
@@ -559,6 +561,28 @@ pub fn parse_cells(v: &str) -> Option<Vec2> {
 }
 
 /// A spell by its name without spaces, any case.
+/// `spell:<name>[:ticks]` or `building:<name>[:ticks]`: a reward and how far into its cinematic.
+pub fn parse_discover(v: &str) -> Option<(game_core::building::Reward, u32)> {
+    use game_core::building::Reward;
+    let mut parts = v.split(':');
+    let (what, name) = (parts.next()?, parts.next()?);
+    let ticks = parts.next().map_or(Some(0), |t| t.parse().ok())?;
+    let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    let reward = match what {
+        "spell" => Reward::Spell(spell_by_name(name)?),
+        "building" => Reward::Building(game_core::build_book::BUILDABLE.into_iter().find(|&k| squash(crate::hud::build::panel_name(k)).starts_with(&squash(name)))?),
+        _ => return None,
+    };
+    Some((reward, ticks))
+}
+
+fn discover_demo(map: &mut game_core::map::GameMap, reward: game_core::building::Reward, ticks: u32) {
+    let from = map.buildings.iter().find(|b| b.vault.is_some()).map(|b| b.centre()).or_else(|| map.shaman_of(PLAYER).map(|u| (u.x, u.z))).unwrap_or((0, 0));
+    let back = game_core::discovery::HIDE.get() + ticks;
+    let granted = game_core::time::Tick::from_wire(map.now.to_wire().wrapping_sub(back));
+    map.discoveries.push(game_core::discovery::Discovery { owner: PLAYER, reward, from, granted });
+}
+
 pub fn spell_by_name(name: &str) -> Option<game_core::spell_book::SpellKind> {
     game_core::spell_book::SpellKind::ALL.into_iter().find(|k| k.name().replace(' ', "").eq_ignore_ascii_case(name))
 }
@@ -670,6 +694,9 @@ fn screenshot(
         cmds.extend(attack_commands(&std::env::var("ATTACK").unwrap_or_default(), &map.0));
         for c in &cmds {
             dirty.0 |= map.0.apply(c).is_some();
+        }
+        if let Some((reward, ticks)) = std::env::var("DISCOVER").ok().and_then(|v| parse_discover(&v)) {
+            discover_demo(&mut map.0, reward, ticks);
         }
         if let Ok(how) = std::env::var("TUMBLE") {
             tumble_demo(&how, &mut map.0);
@@ -885,6 +912,9 @@ mod tests {
     fn vault_phase_from_env() {
         use game_core::vault::VaultPhase;
         assert_eq!(parse_vault("progress:95"), Some(VaultPhase::Praying { progress: 95 * game_core::gauge::STEP }), "in PrayTime units");
+        assert_eq!(parse_discover("spell:swarm:12"), Some((game_core::building::Reward::Spell(game_core::spell_book::SpellKind::Swarm), 12)));
+        assert!(matches!(parse_discover("building:temple"), Some((game_core::building::Reward::Building(_), 0))));
+        assert_eq!(parse_discover("mana:5"), None);
         assert_eq!(parse_vault("granted:3"), Some(VaultPhase::Granted { ticks: 3 }));
         assert_eq!(parse_vault("spent"), Some(VaultPhase::Spent));
         assert_eq!((parse_vault("granted"), parse_vault("open")), (None, None));

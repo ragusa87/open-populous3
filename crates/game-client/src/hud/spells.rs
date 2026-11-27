@@ -267,6 +267,37 @@ fn load_generated_icons(levels: Res<LevelList>, assets: Res<AssetServer>, mut ic
     icons.0 = SpellKind::ALL.iter().filter_map(|&k| Some((k, assets.load(generated_glyph_asset(k)?)))).collect();
 }
 
+/// A spell's glyph to fly to the panel (`discovery`): the original's in dark ink, else the generated one.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct FlyingGlyphs<'w> {
+    icons: ResMut<'w, crate::tooltip::IconImages>,
+    images: ResMut<'w, Assets<Image>>,
+    generated: Res<'w, GeneratedSpellIcons>,
+}
+
+impl FlyingGlyphs<'_> {
+    pub fn glyph(&mut self, kind: SpellKind) -> Option<(Handle<Image>, Color)> {
+        let original = panel_glyph(kind).and_then(|index| self.icons.sprite(index, &mut self.images)).map(|g| (g.0, INK));
+        original.or_else(|| self.generated.0.get(&kind).map(|h| (h.clone(), Color::WHITE)))
+    }
+}
+
+/// Where each spell's tile is on screen (`discovery`).
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct SpellTiles<'w, 's> {
+    map: Res<'w, CurrentMap>,
+    tiles: Query<'w, 's, (&'static Tile, &'static UiGlobalTransform, &'static ComputedNode)>,
+}
+
+impl SpellTiles<'_, '_> {
+    /// The centre of `kind`'s tile, logical pixels, once laid out.
+    pub fn centre(&self, kind: SpellKind) -> Option<Vec2> {
+        let slot = slot_of(&player_book(&self.map.0).slots, kind)?;
+        let (_, at, node) = self.tiles.iter().find(|(t, _, n)| t.0 == slot && n.size() != Vec2::ZERO)?;
+        Some(at.translation * node.inverse_scale_factor())
+    }
+}
+
 pub struct SpellsPlugin;
 
 impl Plugin for SpellsPlugin {

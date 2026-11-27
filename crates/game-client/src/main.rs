@@ -36,6 +36,7 @@ mod construction;
 mod convert_ring;
 mod cursor_debug;
 mod dev;
+mod discovery;
 mod edge_push;
 mod editor;
 mod effects;
@@ -158,7 +159,7 @@ fn main() {
             (camera_debug::CameraDebugPlugin, cell_debug::CellDebugPlugin, debug_overlay::DebugOverlayPlugin, fire_flame::FireFlamePlugin, burning_buildings::BurningBuildingsPlugin),
             (object_scale::ObjectScalePlugin, angel_of_death::AngelOfDeathPlugin, angel_meteor::AngelMeteorPlugin),
             (chimney::ChimneyPlugin, fireball_shot::FireballShotPlugin, blast_fireball::BlastFireballPlugin, blast_impact::BlastImpactPlugin, splash::SplashPlugin, flyby::FlybyPlugin, site_shot::SiteShotPlugin),
-            (range_ring::RangeRingPlugin, (sparkles::SparklesPlugin, convert_ring::ConvertRingPlugin, levelling_ring::LevellingRingPlugin, vault_icon::VaultIconPlugin), lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, (firebolts::FireboltsPlugin, firebrands::FirebrandsPlugin), explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, swarm::SwarmPlugin, volcano_rocks::VolcanoRocksPlugin, (lava::LavaPlugin, whirlwind::WhirlwindPlugin)),
+            (range_ring::RangeRingPlugin, (sparkles::SparklesPlugin, convert_ring::ConvertRingPlugin, levelling_ring::LevellingRingPlugin, vault_icon::VaultIconPlugin, discovery::DiscoveryPlugin), lightning::LightningPlugin, smoke::SmokePlugin, ground_fire::GroundFirePlugin, burning_trees::BurningTreesPlugin, (firebolts::FireboltsPlugin, firebrands::FirebrandsPlugin), explosion::ExplosionPlugin, vehicles::VehiclesPlugin, progress_bar::ProgressBarPlugin, armageddon::ArmageddonPlugin, swamp::SwampPlugin, swarm::SwarmPlugin, volcano_rocks::VolcanoRocksPlugin, (lava::LavaPlugin, whirlwind::WhirlwindPlugin)),
         ))
         .add_systems(Update, toggle_fullscreen)
         .run();

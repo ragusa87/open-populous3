@@ -197,7 +197,12 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   [exe]) after the grant and lasting `BUILDING_FLIGHT` (50 turns) or `SPELL_FLIGHT` (15) [ours: the exe counts
   drawn frames, taken at a guessed 30 a second], then lands (`granted`, the books). A computer tribe's, and any
   other reward, lands at once (the original waits 82 turns for everyone but the player). The same turns for every
-  peer, so lockstep holds; the client draws the cinematic from `Discovery::started`.
+  peer, so lockstep holds; the client draws the cinematic from `Discovery::started` (client `discovery.rs`), its
+  drawn frames spread over the flight's turns on simulation time: it stops while paused and arrives on the landing
+  turn. A spell: its panel glyph from over the vault (the middle of the side panel when the vault is out of view)
+  to the middle of the view, growing to 8× and turning (the exe's frames: 1 aim, 13 to the middle, 4 still), then
+  onto its tile in 18 frames, speeding up ×1.5 a frame to a cap and spread over the distance (ours: the exe's runs
+  until it gets there); the Spells tab shown from then; sound 0x71 at the start. Dev: `DISCOVER=spell:<name>:<ticks>`.
 
 ## Open
 - `PrayTime`'s unit for a **vault** is confirmed (pop3-rev-analysis.md "The vault"): the same 4-turn tick as a
