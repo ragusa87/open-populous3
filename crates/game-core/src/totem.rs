@@ -1,7 +1,7 @@
 //! Totems: the places units pray at for a reward (docs/specs/worship.md). A level's totem is
 //! scenery 9; who may pray at it, how many count and how long it takes come from the trigger on its
-//! cell. Which original model the levels' totems use is not known: they are drawn as stone heads,
-//! and the Worship sandbox shows every candidate.
+//! cell, and so does its look (`look_of`): a stone totem, a winged-death totem, a stone head or a totem pole.
+//! The Worship sandbox shows every one.
 
 use crate::building::{BuildingKind, Reward};
 use crate::id::Id;
@@ -36,6 +36,19 @@ pub const SCENERY_TOTEM: u8 = 9;
 const TRIGGER_UNITS: u8 = 0;
 const TRIGGER_SHAMAN: u8 = 3;
 const TRIGGER_SHAMAN_ANGEL: u8 = 5;
+
+/// A level totem's look from the prayer trigger on its cell (pop3-rev-analysis.md "Scenery looks: plants and prayer
+/// heads" [exe]): the shaman's own trigger a stone totem, the one bringing an Angel of Death the winged-death
+/// totem, one giving a "once" discovery a stone head, any other a totem pole (the original's "permanent discovery"
+/// look is empty and no level uses it).
+pub fn look_of(trigger_type: u8, once_gift: bool) -> TotemKind {
+    match trigger_type {
+        TRIGGER_SHAMAN => TotemKind::Totem,
+        TRIGGER_SHAMAN_ANGEL => TotemKind::WingedDeath,
+        _ if once_gift => TotemKind::StoneHead,
+        _ => TotemKind::Pole(0),
+    }
+}
 /// Gauge length of a totem without a trigger (sandboxes), in ticks of full-speed praying.
 pub const DEFAULT_PRAY_TIME: u16 = 100;
 /// Discovery kind of mana (`DiscoveryType` 6).
@@ -122,7 +135,9 @@ impl Totem {
     pub fn from_trigger(level: &Level, thing: &Thing, trigger: Option<&Trigger>) -> Self {
         let totem = Totem::new(TotemKind::StoneHead, (thing.x, thing.z));
         let Some(t) = trigger else { return totem };
+        let once = t.targets.iter().filter_map(|&slot| level.slot(slot)).any(|target| matches!(target.data(), ThingData::Discovery(d) if d.availability == Availability::Once));
         Totem {
+            kind: look_of(t.trigger_type, once),
             prayers: t.count.max(1),
             shaman_only: matches!(t.trigger_type, TRIGGER_SHAMAN | TRIGGER_SHAMAN_ANGEL),
             summons_angel: t.trigger_type == TRIGGER_SHAMAN_ANGEL,
@@ -307,6 +322,16 @@ mod tests {
         assert_eq!(g[5], Reward::WakeTotem { at });
         assert_eq!(g[6], Reward::Unhandled { kind: KIND_EFFECT, model: 5 }, "meaning not in the docs");
         assert_eq!(gift(&level.things[3], true), Reward::Person { kind: crate::unit::UnitKind::Warrior, owner: None, at }, "CreatePlayerOwned");
+    }
+
+    #[test]
+    fn its_look_comes_from_the_trigger_on_its_cell() {
+        let once = thing(2, KIND_GENERAL, (0, 0), &[DISCOVERY_MANA, 3, 3, 1]);
+        let mut gives_once = trigger((5, 5), 0, 1, 10);
+        gives_once[13..15].copy_from_slice(&3u16.to_le_bytes());
+        let level = level_with(&[totem((5, 5)), gives_once, once, totem((9, 9)), trigger((9, 9), 0, 1, 10), totem((12, 12)), trigger((12, 12), 3, 1, 10), totem((15, 15)), trigger((15, 15), 5, 1, 10), totem((20, 20))]);
+        let kinds: Vec<TotemKind> = totems_from_level(&level).iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, [TotemKind::StoneHead, TotemKind::Pole(0), TotemKind::Totem, TotemKind::WingedDeath, TotemKind::StoneHead]);
     }
 
     #[test]

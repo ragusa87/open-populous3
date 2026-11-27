@@ -149,6 +149,12 @@ pub fn split_head(obj: &Object) -> (Object, Object) {
     (Object { points: obj.points.clone(), faces: pedestal, scale: obj.scale }, Object { points: lowered, faces: head, scale: obj.scale })
 }
 
+/// Whether a stone head nods: only while its trigger is active, still able to give (pop3-rev-analysis.md "Scenery
+/// looks: plants and prayer heads": held on its first frame once inactive).
+pub fn nods(t: &game_core::totem::Totem) -> bool {
+    !t.dormant && !t.is_exhausted()
+}
+
 /// The stone head's nod (radians) at `secs`: `NOD_DEG` each way, one nod every `NOD_SECS`.
 pub fn nod_angle(secs: f32) -> f32 {
     NOD_DEG.to_radians() * (TAU * secs / NOD_SECS).sin()
@@ -318,7 +324,7 @@ fn animate_totems(
                 tf.rotation = GameYaw(if block.0 == 0 { 0.0 } else { TOTAL_TURN * turn }).into();
             }
             if let Ok(mut tf) = pivots.get_mut(e) {
-                tf.rotation = Quat::from_rotation_x(nod);
+                tf.rotation = Quat::from_rotation_x(if nods(t) { nod } else { 0.0 });
             }
             if let Ok(mut p) = puffs.get_mut(e) {
                 p.secs = sinking;
