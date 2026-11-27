@@ -81,7 +81,7 @@ pub fn encode(msg: &Message) -> Vec<u8> {
     b
 }
 
-/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Blast, Lightning, Armageddon, Swamp,
+/// `kind u8, player u8`, then for a cast `spell tag u8 + i16 cells` (Teleport, Flatten, Blast, Lightning, Armageddon, Swamp,
 /// Convert, Hypnotism, Volcano, Firestorm, Earthquake, MagicalShield, Bloodlust, Invisibility: `u16 x, z`), for an
 /// order `order tag u8 [+ u16 x, z]`, for a unit order `u32 unit id` then the order, for lighting or putting out a
 /// camp fire `u16 x, z`, for placing a building `model u8, u16 x, z, facing u8`, for cancelling one `u16 x, z`, for
@@ -98,6 +98,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
         Command::Cast { player, spell } => {
             b.extend([0, player.as_u8()]);
             if let Spell::Teleport { to: at }
+            | Spell::Flatten { at }
             | Spell::Blast { at }
             | Spell::Lightning { at }
             | Spell::Armageddon { at }
@@ -117,6 +118,7 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             {
                 b.push(match spell {
                     Spell::Teleport { .. } => 4,
+                    Spell::Flatten { .. } => 1,
                     Spell::Blast { .. } => 5,
                     Spell::Armageddon { .. } => 7,
                     Spell::Swamp { .. } => 8,
@@ -140,10 +142,10 @@ fn encode_command(b: &mut Vec<u8>, command: &Command) {
             }
             let (tag, cells): (u8, &[(i32, i32)]) = match spell {
                 Spell::LandBridge { from, to } => (0, &[*from, *to]),
-                Spell::Flatten { at } => (1, std::slice::from_ref(at)),
                 Spell::Erode { at } => (2, std::slice::from_ref(at)),
                 Spell::Raise { at } => (3, std::slice::from_ref(at)),
                 Spell::Teleport { .. }
+                | Spell::Flatten { .. }
                 | Spell::Blast { .. }
                 | Spell::Lightning { .. }
                 | Spell::Armageddon { .. }
@@ -392,7 +394,7 @@ fn decode_command(c: &mut Cursor) -> Option<Command> {
         0 => {
             let spell = match c.u8()? {
                 0 => Spell::LandBridge { from: c.cell()?, to: c.cell()? },
-                1 => Spell::Flatten { at: c.cell()? },
+                1 => Spell::Flatten { at: (c.u16()?, c.u16()?) },
                 2 => Spell::Erode { at: c.cell()? },
                 3 => Spell::Raise { at: c.cell()? },
                 4 => Spell::Teleport { to: (c.u16()?, c.u16()?) },
@@ -555,7 +557,7 @@ mod tests {
             tick: Tick::from_wire(7),
             commands: vec![
                 Command::Cast { player: TribeId::Red, spell: Spell::LandBridge { from: (1, 2), to: (120, -3) } },
-                Command::Cast { player: TribeId::Blue, spell: Spell::Flatten { at: (5, 6) } },
+                Command::Cast { player: TribeId::Blue, spell: Spell::Flatten { at: (5 * 512 + 3, 65535) } },
                 Command::Cast { player: TribeId::Blue, spell: Spell::Teleport { to: (65535, 7) } },
                 Command::Cast { player: TribeId::Green, spell: Spell::Blast { at: (9, 65535) } },
                 Command::Cast { player: TribeId::Yellow, spell: Spell::Lightning { at: (512, 7) } },

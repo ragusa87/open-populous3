@@ -113,7 +113,7 @@ pub enum DamageKind {
 pub enum TerrainChange {
     Raise { at: Cell, radius: i32, by: i32 },
     /// One turn of a flatten (`flatten::apply`).
-    Flatten { at: Cell, height: u16, turn: u32 },
+    Flatten { at: (u16, u16), height: u16, turn: u32, radius: u32 },
     /// One turn of a land bridge (`land_bridge::apply`).
     Bridge { from: Cell, to: Cell, heights: (u16, u16), turn: u32 },
     /// One turn of a volcano's cone rising (`volcano::apply`): `ground`, the centre's own height when cast.

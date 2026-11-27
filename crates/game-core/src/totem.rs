@@ -178,7 +178,7 @@ pub fn gift(target: &Thing, player_owned: bool) -> Reward {
             pop3_format::level::EFFECT_LAND_BRIDGE => Some(Spell::LandBridge { from: cell(at), to: cell(aimed) }),
             26 => Some(Spell::Earthquake { at }),
             30 => Some(Spell::Lightning { at }),
-            31 => Some(Spell::Flatten { at: point(at) }),
+            31 => Some(Spell::Flatten { at }),
             73 => Some(Spell::Convert { at }),
             86 => Some(Spell::Armageddon { at }),
             _ => None,

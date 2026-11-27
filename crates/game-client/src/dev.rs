@@ -369,7 +369,8 @@ pub fn bridge_demo(map: &mut game_core::map::GameMap, to: &str, ticks: u32) -> b
 /// `at` does not parse.
 pub fn flatten_demo(map: &mut game_core::map::GameMap, at: &str, ticks: u32) -> bool {
     let Some(at) = at.split_once(',').and_then(|(x, z)| Some((x.trim().parse::<i32>().ok()?, z.trim().parse::<i32>().ok()?))) else { return false };
-    let flatten = game_core::flatten::effect(PLAYER.next(), at, &map.terrain);
+    let world = |c: i32| (c.rem_euclid(map.terrain.size() as i32) as u32 * pop3_format::WORLD_UNITS_PER_CELL) as u16;
+    let flatten = game_core::flatten::effect(PLAYER.next(), (world(at.0), world(at.1)), &map.terrain);
     map.add_effect(flatten);
     map.run(game_core::time::Ticks::new(ticks));
     true

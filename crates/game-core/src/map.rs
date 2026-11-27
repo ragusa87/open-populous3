@@ -1061,7 +1061,8 @@ impl GameMap {
             | Spell::Bloodlust { at }
             | Spell::Invisibility { at } => Some(at),
             Spell::LandBridge { to, .. } => Some(world(to, WORLD_UNITS_PER_CELL / 2)),
-            Spell::Flatten { at } | Spell::Erode { at } => Some(world(at, 0)),
+            Spell::Flatten { at } => Some(at),
+            Spell::Erode { at } => Some(world(at, 0)),
             Spell::Raise { .. } => None,
         }
     }
@@ -2134,7 +2135,7 @@ impl GameMap {
                 None
             }
             WorldEvent::Terrain(TerrainChange::Raise { at, radius, by }) => Some(self.terrain.raise(at, radius, by)),
-            WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn)),
+            WorldEvent::Terrain(TerrainChange::Flatten { at, height, turn, radius }) => Some(crate::flatten::apply(&mut self.terrain, at, height, turn, radius)),
             WorldEvent::Terrain(TerrainChange::Bridge { from, to, heights, turn }) => Some(crate::land_bridge::apply(&mut self.terrain, from, to, heights, turn)),
             WorldEvent::Terrain(TerrainChange::Volcano { at, ground, turn }) => Some(crate::volcano::apply(&mut self.terrain, at, ground, turn)),
             WorldEvent::Terrain(TerrainChange::Erode { at }) => Some(crate::erode::apply(&mut self.terrain, at)),
@@ -3595,7 +3596,7 @@ mod tests {
         let at = (shaman.0, shaman.1 - 6);
         let level = m.terrain.get(at.0, at.1);
         assert!(crate::flatten::disc(at).any(|(x, z)| m.terrain.get(x, z) != level), "the hill's slope");
-        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Flatten { at } });
+        m.apply(&Command::Cast { player: TribeId::Blue, spell: Spell::Flatten { at: ((at.0 * 512) as u16, (at.1 * 512) as u16) } });
         assert!(m.effects.is_empty(), "her cast jump first");
         m.run(crate::unit::CAST_RELEASE);
         assert_eq!(m.effects.len(), 1, "released into the jump");

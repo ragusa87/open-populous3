@@ -10,8 +10,9 @@ pub type Cell = (i32, i32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Spell {
     LandBridge { from: Cell, to: Cell },
-    /// Level the ground around the height point `at` to its height (`flatten`); `cast`: the editor's instant brush.
-    Flatten { at: Cell },
+    /// Level the ground around the point `at` (world units) to its height (`flatten`); `cast`: the editor's instant
+    /// brush, on the nearest height point.
+    Flatten { at: (u16, u16) },
     /// Erode the ground around the height point `at` towards sea level over time (`erode`); `cast`: the editor's
     /// instant brush.
     Erode { at: Cell },
@@ -115,7 +116,7 @@ impl Spell {
     pub fn cast(&self, terrain: &mut Heightmap) -> Option<DirtyRect> {
         Some(match *self {
             Spell::LandBridge { from, to } => terrain.land_bridge(from, to, 32),
-            Spell::Flatten { at } => terrain.flatten(at, 4),
+            Spell::Flatten { at } => terrain.flatten(crate::flatten::nearest_point(at), 4),
             Spell::Erode { at } => terrain.raise(at, 4, -120),
             Spell::Raise { at } => terrain.raise(at, 3, 64),
             Spell::Teleport { .. }
