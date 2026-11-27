@@ -93,13 +93,24 @@ impl Cell {
         self.kind.map_or(counts.total(), |k| counts.get(k))
     }
 
-    /// The units a click adds: the next one not selected yet, or with `all` every one of them.
-    pub fn pick(self, map: &GameMap, tribe: TribeId, selected: &[UnitId], all: bool) -> Vec<UnitId> {
+    /// The units a click adds (pop3-rev-analysis.md "Followers panel icons" [exe]): the one not selected yet nearest
+    /// the camera's cell `near`, `PICK_MANY` of them with Ctrl, every one of them with Shift (never the shaman).
+    pub fn pick(self, map: &GameMap, tribe: TribeId, selected: &[UnitId], how: Pick, near: (i32, i32)) -> Vec<UnitId> {
         let Row::Doing(state) = self.row else { return Vec::new() };
-        if all {
-            return map.units_in(tribe, state, self.kind).map(|u| u.id).filter(|id| !selected.contains(id)).collect();
+        let count = match how {
+            Pick::All => usize::MAX,
+            Pick::Many => PICK_MANY,
+            Pick::One => 1,
+        };
+        let mut taken = selected.to_vec();
+        let mut picked = Vec::new();
+        while picked.len() < count
+            && let Some(id) = map.next_unit(tribe, state, self.kind, &taken, near)
+        {
+            taken.push(id);
+            picked.push(id);
         }
-        map.next_unit(tribe, state, self.kind, selected).into_iter().collect()
+        picked
     }
 
     /// What hovering it says.
@@ -109,9 +120,20 @@ impl Cell {
         let units: Vec<UnitId> = map.units_in(tribe, state, self.kind).map(|u| u.id).collect();
         let picked = units.iter().filter(|id| selected.contains(id)).count();
         let row = self.row.label().to_lowercase();
-        format!("{row}: {} {what}, {picked} selected.\nClick: one more. Shift + click: all.", units.len())
+        format!("{row}: {} {what}, {picked} selected.\nClick: the nearest one more. Ctrl + click: 5. Shift + click: all.", units.len())
     }
 }
+
+/// How many a click picks: one, Ctrl's `PICK_MANY`, or Shift's all (Shift wins over Ctrl).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pick {
+    One,
+    Many,
+    All,
+}
+
+/// Ctrl + click's count (`MULTIPLE_SELECT_NUM`, 5 [exe]).
+pub const PICK_MANY: usize = 5;
 
 fn kind_plural(kind: UnitKind) -> &'static str {
     match kind {
@@ -211,12 +233,20 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>, mut ico
     });
 }
 
-/// A click on a number adds the next of those units to the selection, Shift + click all of them.
-fn cell_clicks(q: Query<(&Interaction, &Cell), Changed<Interaction>>, keys: Res<ButtonInput<KeyCode>>, map: Res<CurrentMap>, mut selection: ResMut<Selection>) {
-    let all = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+/// A click on a number adds the nearest of those units to the camera to the selection, Ctrl + click 5, Shift + click
+/// all of them.
+fn cell_clicks(q: Query<(&Interaction, &Cell), Changed<Interaction>>, keys: Res<ButtonInput<KeyCode>>, map: Res<CurrentMap>, rig: Res<crate::camera::CameraRig>, mut selection: ResMut<Selection>) {
+    let how = if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        Pick::All
+    } else if keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) {
+        Pick::Many
+    } else {
+        Pick::One
+    };
+    let near = (rig.focus.x.floor() as i32, rig.focus.y.floor() as i32);
     for (interaction, cell) in &q {
         if *interaction == Interaction::Pressed {
-            for id in cell.pick(&map.0, PLAYER, &selection.units, all) {
+            for id in cell.pick(&map.0, PLAYER, &selection.units, how, near) {
                 selection.add(id);
             }
         }
@@ -326,10 +356,14 @@ mod tests {
     fn a_click_adds_the_next_unit_shift_all_and_the_selected_row_none() {
         let map = map_with(&[(UnitKind::Warrior, Action::Idle), (UnitKind::Brave, Action::Idle), (UnitKind::Brave, Action::Idle)]);
         let total = Cell { row: Row::Doing(State::Idle), kind: None };
-        assert_eq!(total.pick(&map, PLAYER, &[], false), [Id::from_raw(2)], "braves first");
-        assert_eq!(total.pick(&map, PLAYER, &[2, 3].map(Id::from_raw), false), [Id::from_raw(1)]);
-        assert_eq!(total.pick(&map, PLAYER, &[Id::from_raw(2)], true), [1, 3].map(Id::from_raw));
-        assert!(Cell { row: Row::Selected, kind: None }.pick(&map, PLAYER, &[], true).is_empty());
+        let near = (0, 0);
+        assert_eq!(total.pick(&map, PLAYER, &[], Pick::One, near).len(), 1);
+        assert_eq!(total.pick(&map, PLAYER, &[2, 3].map(Id::from_raw), Pick::One, near), [Id::from_raw(1)]);
+        assert_eq!(total.pick(&map, PLAYER, &[], Pick::Many, near).len(), 3, "up to 5, all 3 here");
+        let mut all = total.pick(&map, PLAYER, &[Id::from_raw(2)], Pick::All, near);
+        all.sort();
+        assert_eq!(all, [1, 3].map(Id::from_raw));
+        assert!(Cell { row: Row::Selected, kind: None }.pick(&map, PLAYER, &[], Pick::All, near).is_empty());
     }
 
     #[test]

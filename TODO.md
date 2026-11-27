@@ -1877,7 +1877,7 @@ Level/world correctness that is mostly stable already (terrain especially: exten
 Additive and mostly independent of the tiers above: chip away at these alongside anything else.
 
 ### UI and editor ([ui-and-editor.md](docs/specs/ui-and-editor.md))
-- [ ] Follower picks as the original (Stats tab clicks, `GameMap::next_unit`): a click adds the not-yet-selected follower of the kind nearest the camera (by activity group first, never the shaman), Ctrl + click the 5 nearest (`MULTIPLE_SELECT_NUM`), Shift + click all of them; the "all" variant skips the shaman (ours: unit id order within a cell, no Ctrl) (pop3-rev-analysis.md "Followers panel icons: click, Ctrl + click, Shift + click").
+- [x] Follower picks as the original (pop3-rev-analysis.md "Followers panel icons"): nearest the camera, Ctrl + click 5, Shift + click all, never the shaman (`GameMap::next_unit`, Stats tab).
 - [ ] Notifications (ui-and-editor.md "Notifications", reported, nothing implemented yet): a stacking icon area
   right of the panels - information notices open a modal dialog, "preaching" and enemy-spell-cast notices jump
   the camera to the event instead (enemy-spell ones also show a small vertical bar in the casting tribe's own

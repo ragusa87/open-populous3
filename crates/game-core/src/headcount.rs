@@ -159,14 +159,16 @@ impl GameMap {
         units.into_iter()
     }
 
-    /// The unit a pick adds: the lowest id doing `state` not in `taken`, of `kind`, or when None of the
-    /// first kind in `KINDS` order with one left.
-    pub fn next_unit(&self, tribe: TribeId, state: State, kind: Option<UnitKind>, taken: &[UnitId]) -> Option<UnitId> {
-        let kinds: &[UnitKind] = match kind {
-            Some(ref k) => std::slice::from_ref(k),
-            None => &KINDS,
-        };
-        kinds.iter().find_map(|&k| self.units_in(tribe, state, Some(k)).map(|u| u.id).find(|id| !taken.contains(id)))
+    /// The unit a pick adds (pop3-rev-analysis.md "Followers panel icons" [exe]): of the tribe's followers doing
+    /// `state` not in `taken`, of `kind` or of any (never the shaman), the one nearest the camera's cell `near`
+    /// across the map's edge, the lowest id on a tie.
+    pub fn next_unit(&self, tribe: TribeId, state: State, kind: Option<UnitKind>, taken: &[UnitId], near: (i32, i32)) -> Option<UnitId> {
+        let size = self.terrain.size() as i32;
+        let d = |a: i32, b: i32| { let d = (a - b).rem_euclid(size); d.min(size - d) as i64 };
+        self.units_in(tribe, state, kind)
+            .filter(|u| KINDS.contains(&u.kind) && !taken.contains(&u.id))
+            .min_by_key(|u| { let c = u.cell(); (d(c.0, near.0).pow(2) + d(c.1, near.1).pow(2), u.id) })
+            .map(|u| u.id)
     }
 
     /// The tribe's population (living units but the shaman, wildmen and any Ghost Army copy) and its built huts
@@ -328,18 +330,20 @@ mod tests {
     }
 
     #[test]
-    fn picks_go_in_id_order_and_skip_the_taken() {
+    fn picks_go_nearest_the_camera_first_and_skip_the_taken() {
         let mut map = empty();
         let warrior = add(&mut map, TribeId::Blue, UnitKind::Warrior);
         let a = add(&mut map, TribeId::Blue, UnitKind::Brave);
         let b = add(&mut map, TribeId::Blue, UnitKind::Brave);
+        (map.units[b].x, map.units[warrior].x) = (70 * 512, 120 * 512);
         let (w, a, b) = (map.units[warrior].id, map.units[a].id, map.units[b].id);
-        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[]), Some(a));
-        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[a]), Some(b));
-        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[a, b]), None);
-        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, None, &[]), Some(a), "braves first, though the warrior's id is lower");
-        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, None, &[a, b]), Some(w));
-        assert_eq!(map.next_unit(TribeId::Blue, State::Housed, None, &[]), None);
+        let near = (71, 64);
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[], near), Some(b), "nearest the camera");
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[b], near), Some(a));
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, Some(UnitKind::Brave), &[a, b], near), None);
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, None, &[a, b], (120, 64)), Some(w), "any kind");
+        assert_eq!(map.next_unit(TribeId::Blue, State::Idle, None, &[], (0, 64)), Some(w), "across the map's edge");
+        assert_eq!(map.next_unit(TribeId::Blue, State::Housed, None, &[], near), None);
         assert_eq!(map.units_in(TribeId::Blue, State::Idle, None).map(|u| u.id).collect::<Vec<_>>(), vec![w, a, b]);
     }
 

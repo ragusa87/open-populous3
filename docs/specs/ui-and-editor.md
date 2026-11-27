@@ -134,15 +134,14 @@ The player's units at a glance, as a matrix in the panel's width (204 px), and a
 - Look ("D1"): each number on a tile like the spell tiles (`PARCHMENT` panel, light tiles with a dark brown
   border), the totals on dark brown tiles with light figures; the Selected row on brighter gold tiles, its label
   in bold, its total darker; zeros dimmed. Labels never wrap.
-- Clicks (the Selected row is display only):
-  - a number: one more unit of that kind and row joins the selection (one not selected yet), so three clicks on a
-    3 select all three; Shift + click: all of them at once;
-  - a row's total: one more unit of that row, kinds taken in column order (braves first, then warriors...);
-    Shift + click: the whole row (e.g. every idle unit).
-  The tiles do not show what is picked; the Selected row does. Hovering a tile or a total outlines it.
-  [exe] The original's follower icons pick by distance instead: a click adds the not-yet-selected follower of the
-  type nearest the camera (by activity group first), Ctrl + click the 5 nearest, Shift + click all; its "all" icon
-  skips the shaman (pop3-rev-analysis.md "Followers panel icons: click, Ctrl + click, Shift + click").
+- Clicks (the Selected row is display only), as the original's follower icons (pop3-rev-analysis.md "Followers
+  panel icons: click, Ctrl + click, Shift + click" [exe]; `GameMap::next_unit`, `stats::Cell::pick`):
+  - a number: the unit of that kind and row not selected yet nearest the camera's cell joins the selection, so
+    three clicks on a 3 select all three; Ctrl + click: the 5 nearest (`MULTIPLE_SELECT_NUM`); Shift + click: all
+    of them at once (Shift wins over Ctrl);
+  - a row's total: the same over every kind of that row, never the shaman.
+  Our rows stand for the original's activity groups (its group order is not traced). The tiles do not show what is
+  picked; the Selected row does. Hovering a tile or a total outlines it.
 - Counts read from the simulation each frame: `game_core::headcount` (`GameMap::headcount`, `state_of`, `kinds_of`
   for the Selected row), shared with the computer players; which unit a click adds is `GameMap::next_unit`, in unit
   id order within a cell [ours]. Working: an action on a task (cutting, holding wood, flattening, building, entering,
