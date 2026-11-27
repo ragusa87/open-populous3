@@ -1049,7 +1049,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
   Level 15 has one (so far the only level seen with a prison). Observed live: a pyrotechnic hit knocked the
   imprisoned shaman outside the prison and killed her, so being locked inside does not make her unattackable/
   unkillable as assumed - check what actually protects her (if anything) and what ejects her from the building.
-- [ ] Model size (pop3-rev-analysis.md "Model size: the per-object scale"): draw each original model at
+- [x] Model size (pop3-rev-analysis.md "Model size: the per-object scale"): draw each original model at
   `point × scale / 65536` cells, `scale` the `objs` record's u32 at offset 12 (`pop3_format::objects` does not read
   it yet), on all three axes, instead of `point / 512`. Buildings, huts, vehicles and the prison (160) grow 1.25 ×,
   the pyramid and its doors (150) 1.17 × (1023 high instead of 873); trees and scenery have their own values.
