@@ -80,7 +80,7 @@ pub fn pose_name(pose: Pose) -> &'static str {
     }
 }
 
-/// Whether a kind's sheets have a pose: only the shaman casts, and she is never stranded; the wood
+/// Whether a kind's sheets have a pose: only the shaman casts, and she has no stranded pose (idle stands in); the wood
 /// jump, tumbling, panic, carbonize and taunt poses are not rendered yet (`Pose::fallback` stands in).
 pub fn plays(kind: UnitKind, pose: Pose) -> bool {
     match pose {

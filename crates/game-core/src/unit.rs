@@ -34,10 +34,27 @@ pub const SLOPE_FACTOR_RANGE: (i32, i32) = (32, 384);
 /// "Drowning": the same for every kind).
 pub const DROWN_SINK: u16 = 16;
 pub const DROWN_DEPTH: u16 = 256;
-/// Health lost at a time while stranded (a guess).
-pub const STRANDED_DAMAGE: u16 = 20;
-/// Between two `STRANDED_DAMAGE`s, at each unit's own phase (the shaman's health lasts 33 s; a guess).
-pub const STRANDED_HURT_EVERY: Every = Every::new(4);
+/// Stranded, every 8 turns at the unit's own phase: its grace timer grows, then it loses `STRANDED_DAMAGE`
+/// (pop3-rev-analysis.md "Stranded" [exe, measured]).
+pub const STRANDED_CHECK: Every = Every::new(8);
+/// Life lost on each check once its grace is over [exe].
+pub const STRANDED_DAMAGE: u16 = 56;
+/// What a check adds to the grace timer [exe].
+pub const STRANDED_GRACE_STEP: u16 = 7;
+/// The grace timer's ceiling, damage starting once it is reached [exe]: 32 for wildmen (40 turns), 352 for a
+/// human tribe (408 turns), 864 for a computer one (992 turns).
+pub const STRANDED_GRACE_WILD: u16 = 32;
+pub const STRANDED_GRACE_HUMAN: u16 = 352;
+pub const STRANDED_GRACE_COMPUTER: u16 = 864;
+
+/// The stranded grace ceiling of a unit of `owner`, whose tribe is `computer`-controlled or not.
+pub fn stranded_grace(owner: Owner, computer: bool) -> u16 {
+    match owner {
+        Owner::Wild => STRANDED_GRACE_WILD,
+        _ if computer => STRANDED_GRACE_COMPUTER,
+        _ => STRANDED_GRACE_HUMAN,
+    }
+}
 
 /// A unit making less than this much real headway (world units, straight-line) over `STUCK_WINDOW` counts as
 /// stuck even while nominally still walking somewhere (`Action::Walking`, or `Attacking` while in the open,
@@ -612,6 +629,8 @@ pub struct Unit {
     stuck_watch: Option<(Tick, (u16, u16))>,
     /// Turns in a row it has not moved (capped): what it is doing may say walk while it waits (`stood_still`).
     still_ticks: u8,
+    /// Its stranded grace timer (`stranded_check`), 0 whenever it is not stranded.
+    stranded_for: u16,
     /// The turns left of a shuffle's hold (`crate::idle`): it has turned on the spot and stands still.
     shuffle: Option<Countdown>,
     /// The building (id) this brave is assigned to, `Order::Build`.
@@ -690,6 +709,7 @@ impl Unit {
             idle_ticks: 0,
             stuck_watch: None,
             still_ticks: 0,
+            stranded_for: 0,
             shuffle: None,
             work: None,
             inside: None,
@@ -1063,6 +1083,9 @@ impl Unit {
     /// One simulation step. `site` is where the unit reincarnates.
     pub fn tick(&mut self, now: Tick, ground: &impl Ground, site: Option<&ReincarnationSite>) -> Option<UnitEvent> {
         self.idle_ticks = if self.truly_idle() { self.idle_ticks.saturating_add(1) } else { 0 };
+        if !matches!(self.action, Action::Stranded { .. }) {
+            self.stranded_for = 0;
+        }
         if self.action != Action::Idle {
             self.shuffle = None;
         }
@@ -1200,8 +1223,6 @@ impl Unit {
                             self.start_grazing(now);
                         }
                     }
-                } else if self.hurt(now) {
-                    return Some(UnitEvent::Died);
                 }
             }
             Action::Grazing { drink, at, mut left } => {
@@ -1407,7 +1428,7 @@ impl Unit {
             && self.is_alive()
             && !self.health.is_zero()
             && !self.motion.airborne()
-            && !matches!(self.action, Action::Drowning { .. } | Action::Stranded { .. } | Action::OnFire { .. } | Action::Grabbed { .. } | Action::Tumbling | Action::Whirled { .. })
+            && !matches!(self.action, Action::Drowning { .. } | Action::OnFire { .. } | Action::Grabbed { .. } | Action::Tumbling | Action::Whirled { .. })
             && !self.statuses.struck_by_lightning.is_on()
     }
 
@@ -1424,15 +1445,18 @@ impl Unit {
         }
     }
 
-    /// Stranded: `STRANDED_DAMAGE` lost on its `STRANDED_HURT_EVERY` turns; true when that kills her.
-    fn hurt(&mut self, now: Tick) -> bool {
-        if STRANDED_HURT_EVERY.fires(now, self.id.raw()) {
-            self.health.damage(STRANDED_DAMAGE);
+    /// One stranded check (`STRANDED_CHECK`, `GameMap::tend_stranded`): the grace timer grows by
+    /// `STRANDED_GRACE_STEP` until it reaches `grace`, then each check costs `STRANDED_DAMAGE`; true when that kills
+    /// it. Leaving the state restarts the grace (`Unit::tick`).
+    pub fn stranded_check(&mut self, grace: u16) -> bool {
+        if !matches!(self.action, Action::Stranded { .. }) || !self.is_alive() {
+            return false;
         }
-        if self.health.is_zero() {
-            self.die(false);
+        if self.stranded_for < grace {
+            self.stranded_for += STRANDED_GRACE_STEP;
+            return false;
         }
-        self.health.is_zero()
+        self.take_damage(STRANDED_DAMAGE)
     }
 
     /// Runs off in panic towards `away` (`panic_heading`), forgetting its plans; nothing while it takes no orders
@@ -1931,15 +1955,15 @@ impl Unit {
         found
     }
 
-    /// Path to `to` on the current terrain: walking if there is one, else stranded (the shaman
-    /// just stays idle).
+    /// Path to `to` on the current terrain: walking if there is one, else stranded, the shaman too
+    /// (pop3-rev-analysis.md "Stranded": any type).
     fn plan(&mut self, to: (u16, u16), ground: &impl Ground, straighten: bool) {
         let found = self.route_to(to, ground, straighten);
         let walled = ground.walled((cell_of(to.0), cell_of(to.1)));
         self.action = match found {
             true => Action::Walking { to },
             // Behind walls nobody gets to: no point waiting for the ground to open a way.
-            false if self.kind == UnitKind::Shaman || walled => Action::Idle,
+            false if walled => Action::Idle,
             false => Action::Stranded { to },
         };
     }
@@ -2368,8 +2392,9 @@ mod tests {
         assert_eq!((u.x, u.z), to);
         let (mut u, site) = shaman_at((10, 10));
         let start = (u.x, u.z);
-        walk(&mut u, &t, &site, (15 * 512 + 256, start.1), 10);
-        assert_eq!((u.action, u.x, u.z), (Action::Idle, start.0, start.1), "top of the cliff: unreachable");
+        let top = (15 * 512 + 256, start.1);
+        walk(&mut u, &t, &site, top, 10);
+        assert_eq!((u.action, u.x, u.z), (Action::Stranded { to: top }, start.0, start.1), "top of the cliff: unreachable");
     }
 
     #[test]
@@ -2398,9 +2423,8 @@ mod tests {
         let start = (u.x, u.z);
         let to = (20 * 512 + 256, u.z);
         u.order(Order::MoveTo { x: to.0, z: to.1 });
-        run(&mut u, &t, &site, 3 * STRANDED_HURT_EVERY.period() as usize);
+        run(&mut u, &t, &site, 3 * STRANDED_CHECK.period() as usize);
         assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "arms up, not moving");
-        assert_eq!(u.health.current(), SHAMAN_MAX_HEALTH - 3 * STRANDED_DAMAGE);
         for z in 0..128 {
             for x in 15..17 {
                 t.set(x, z, 100);
@@ -2435,10 +2459,6 @@ mod tests {
         u.tick(Tick::from_wire(STUCK_WINDOW.get()), &t, Some(&site));
         u.tick(Tick::from_wire(STUCK_WINDOW.get() + 1), &t, Some(&site));
         assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1), "stuck the whole window: arms up instead of frozen forever");
-        for k in 0..STRANDED_HURT_EVERY.period() {
-            u.tick(Tick::from_wire(STUCK_WINDOW.get() + 2 + k), &t, Some(&site));
-        }
-        assert!(u.health.current() < SHAMAN_MAX_HEALTH, "loses life too, same as any other stranded unit");
     }
 
     #[test]
@@ -2454,29 +2474,37 @@ mod tests {
     }
 
     #[test]
-    fn stranded_until_dead_unless_ordered_otherwise() {
+    fn stranded_it_waits_out_its_grace_then_loses_56_a_check_and_leaving_restarts_it() {
         let mut t = land();
         sea_cell(&mut t, (20, 10));
         let (u, site) = shaman_at((10, 10));
-        let mut u = Unit { kind: UnitKind::Brave, ..u };
+        let mut u = Unit { kind: UnitKind::Brave, health: Health::full(1000), ..u };
         u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
         run(&mut u, &t, &site, 1);
+        let checks_free = (1..).find(|_| u.stranded_check(STRANDED_GRACE_HUMAN) || u.health.current() < 1000).unwrap();
+        assert_eq!(checks_free, 52, "51 checks of grace (408 turns), the 52nd hurts");
+        assert_eq!(u.health.current(), 1000 - STRANDED_DAMAGE);
         u.order(Order::Stop);
-        assert_eq!(u.action, Action::Idle, "orders still work");
+        run(&mut u, &t, &site, 1);
+        assert_eq!(u.stranded_for, 0, "leaving restarts the grace");
         u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
-        let events = run(&mut u, &t, &site, STRANDED_HURT_EVERY.period() as usize * (SHAMAN_MAX_HEALTH / STRANDED_DAMAGE) as usize);
-        assert_eq!((events, u.health.current(), u.is_alive()), (vec![UnitEvent::Died], 0, false));
+        run(&mut u, &t, &site, 1);
+        assert!((0..51).all(|_| !u.stranded_check(STRANDED_GRACE_HUMAN)) && u.health.current() == 1000 - STRANDED_DAMAGE);
+        let kills = (0..20).position(|_| u.stranded_check(STRANDED_GRACE_HUMAN)).unwrap();
+        assert_eq!((kills, u.is_alive()), (16, false), "17 more hits: 1000 = 18 × 56 - 8");
+        assert_eq!((stranded_grace(Owner::Wild, false), stranded_grace(Owner::Tribe(TribeId::Red), true)), (STRANDED_GRACE_WILD, STRANDED_GRACE_COMPUTER));
     }
 
     #[test]
-    fn the_shaman_does_not_move_towards_an_unreachable_target() {
+    fn the_shaman_is_stranded_by_an_unreachable_target_too() {
         let mut t = land();
         sea_cell(&mut t, (20, 10));
         let (mut u, site) = shaman_at((10, 10));
         let start = (u.x, u.z);
-        u.order(Order::MoveTo { x: 20 * 512 + 256, z: u.z });
+        let to = (20 * 512 + 256, u.z);
+        u.order(Order::MoveTo { x: to.0, z: to.1 });
         run(&mut u, &t, &site, 10);
-        assert_eq!((u.action, u.x, u.z, u.health.current()), (Action::Idle, start.0, start.1, SHAMAN_MAX_HEALTH));
+        assert_eq!((u.action, u.x, u.z), (Action::Stranded { to }, start.0, start.1));
     }
 
     #[test]
@@ -2869,7 +2897,7 @@ mod tests {
     }
 
     #[test]
-    fn no_healing_in_the_air_drowning_stranded_or_dead() {
+    fn no_healing_in_the_air_drowning_or_dead_but_stranded_yes() {
         let (s, _) = shaman_at((10, 10));
         let hurt = Unit { health: Health::new(100, SHAMAN_MAX_HEALTH), ..s };
         let flung = Unit { motion: Motion::flying(Velocity::ZERO, 50), action: Action::Tumbling, ..hurt.clone() };
@@ -2877,8 +2905,8 @@ mod tests {
         let stranded = Unit { action: Action::Stranded { to: (0, 0) }, ..hurt.clone() };
         let dying = Unit { action: Action::Dying { left: Countdown::new(DYING_TICKS), fell: false }, ..hurt.clone() };
         let burning = Unit { action: Action::OnFire { away: (0, 0), left: Countdown::new(BURN_TICKS) }, ..hurt.clone() };
-        assert!(hurt.heals());
-        assert!([flung, drowning, stranded, dying, burning].iter().all(|u| !u.heals()));
+        assert!(hurt.heals() && stranded.heals(), "the life step runs while stranded [exe]");
+        assert!([flung, drowning, dying, burning].iter().all(|u| !u.heals()));
     }
 
     #[test]

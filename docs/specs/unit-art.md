@@ -137,7 +137,7 @@ The Quaternius characters have no "arms up" clip. Of the candidates, `Defeat` pu
 where the stance reads best): 0-20% arms rising from the sides, 20-40% arms half up and spread, 45-80% both arms
 fully above the head, 80-100% coming back down. The sheet loops 4 frames over 45-80% (`Timing::Span`), at 4 fps;
 an earlier span (22-67%) showed the arms only shoulder high. The baker shoots it for every follower, not the
-shaman (she is never stranded). With the original files the followers hold a frame of anim 12 instead (animations.md).
+shaman (stranded, she stands: idle stands in). With the original files the followers hold a frame of anim 12 instead (animations.md).
 
 ### Planned poses (CC0 stand-ins)
 The original animations identified in animations.md, and how the Quaternius models could stand in for them. Each

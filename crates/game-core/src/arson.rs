@@ -24,6 +24,9 @@ pub const WITHDRAW_TICKS: Ticks = Ticks::new(24);
 pub const FIREBRAND_TICKS: Ticks = Ticks::new(64);
 /// Close enough to its spot to start aiming, world units: the original's 12 on both axes [exe].
 const ARRIVED: i32 = 12;
+/// Close enough when it cannot get closer (stranded, or stopped short): within a cell on both axes. Ours holds one
+/// person per standing spot, so a second spy on the same building stands beside the first `[ours]`.
+const ARRIVED_BESIDE: i32 = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -83,13 +86,15 @@ impl GameMap {
                     let events = self.arson_turn(i, building, stage, left);
                     self.apply_events(events);
                 }
-                Action::Idle if u.in_the_open() => {
+                Action::Idle | Action::Stranded { .. } if u.in_the_open() => {
                     if !self.arson_target(building) {
                         self.units[i].arson = None;
                         continue;
                     }
                     let Some(spot) = self.arson_spot(building) else { continue };
-                    if torus_delta(u.x, spot.0).abs() <= ARRIVED && torus_delta(u.z, spot.1).abs() <= ARRIVED {
+                    let within = |d: i32| torus_delta(u.x, spot.0).abs() <= d && torus_delta(u.z, spot.1).abs() <= d;
+                    let stuck = matches!(u.action, Action::Stranded { .. }) || u.idle_ticks() > 0;
+                    if within(ARRIVED) || (stuck && within(ARRIVED_BESIDE)) {
                         let centre = self.building(building).map(|b| b.centre()).unwrap_or(spot);
                         self.units[i].face(centre);
                         self.units[i].action = Action::Arson { building, stage: Stage::Aim, left: Countdown::new(AIM_TICKS) };

@@ -1652,6 +1652,7 @@ impl GameMap {
         self.tend_vehicles();
         self.units.iter_mut().for_each(|u| u.statuses.tick(now, u.id.raw()));
         self.revert_expired_hypnosis();
+        self.tend_stranded();
         if crate::unit::HEAL_EVERY.fires(now, 0) {
             self.units.iter_mut().for_each(Unit::heal);
         }
@@ -2265,6 +2266,16 @@ impl GameMap {
     /// `Unit::take_hit` remembers `from` and, if it kills, `kind` (`hurt.rs`). A ghost is destroyed outright
     /// instead (docs/plans/ghost.md): never wounded, never counted as a normal kill (`apply_event`'s own tally
     /// only fires on `true`).
+    /// Every stranded unit's check on its own `STRANDED_CHECK` phase, its grace from its tribe
+    /// (`unit::stranded_grace`: a wildman's, a computer tribe's or a human one's).
+    fn tend_stranded(&mut self) {
+        let now = self.now;
+        for u in self.units.iter_mut().filter(|u| crate::unit::STRANDED_CHECK.fires(now, u.id.raw())) {
+            let computer = u.owner.tribe().is_some_and(|t| self.tribes.is_computer(t));
+            u.stranded_check(crate::unit::stranded_grace(u.owner, computer));
+        }
+    }
+
     pub(crate) fn damage(&mut self, unit: UnitId, amount: u16, kind: DamageKind, from: Option<Owner>) -> bool {
         match self.unit_index(unit).filter(|&i| crate::effect::hurts(&self.units[i], kind, from)) {
             Some(i) if self.units[i].statuses.ghost => {

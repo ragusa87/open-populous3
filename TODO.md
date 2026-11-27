@@ -216,7 +216,7 @@ What a match plays through today: combat, orders/the tick, units, spells, buildi
   code at all. Also checked: a pyramid of knowledge (`BuildingKind::Vault`)'s own footprint is an ordinary
   rectangle, same as any other building, no special corner handling needed or missing found - no evidence of
   a pyramid-specific pathing bug; needs a more specific repro (level, position) to look at further.
-- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values, which are the ones the original runs on). Traced (pop3-rev-analysis.md "Starting and maximum life", "Stranded"): roll each person's maximum and starting life once at birth in [3/4, 1) of the kind's life (the game generator; ours gives everyone the full value); stranded: no damage for a grace of 408 turns (human tribe) or 992 (computer), 40 for wildmen, restarted on each entry, then 56 life every 8 turns at the unit's own phase (ours: 20 every 4 from the first turn), still healing meanwhile (ours: no healing while stranded), and the shaman can be stranded too. Drowning already follows the trace (a flat 16 turns whatever the health, `DROWN_SINK`/`DROWN_DEPTH`, pop3-rev-analysis.md "Drowning").
+- [ ] Health: read the lives from `constant.dat` once parsed (`KindStats::life` holds the file's values, which are the ones the original runs on). Traced (pop3-rev-analysis.md "Starting and maximum life", "Stranded"): roll each person's maximum and starting life once at birth in [3/4, 1) of the kind's life (the game generator; ours gives everyone the full value); stranding follows the trace (`GameMap::tend_stranded`). Drowning already follows the trace (a flat 16 turns whatever the health, `DROWN_SINK`/`DROWN_DEPTH`, pop3-rev-analysis.md "Drowning").
 - [ ] Vehicles: feet/hull on the ground and never cut by nearby slopes, like units (`units::toward_eye`).
 - [ ] Vehicles ignore the walking slope speed (flying ones ignore the ground, the sea is always at height 0).
 - [ ] Walk animation rate could follow the slope speed (slower steps uphill).
@@ -1087,7 +1087,22 @@ The single biggest remaining system, and the one that turns this from a sandbox/
 ### Computer players (AI)
 - [ ] **For a spec session**: trace the computer tribes on levels 1 and 2 - when they start training units
   (which trainings, at what turn) and how many - and compare with ours (`game_core::ai`, the scripts'
-  training settings): something is off in play.
+  training settings): something is off in play. **Level 1 measured live** (pop3-rev-analysis.md "Level 1, live:
+  when red trains, and what the bridge really triggers"); level 2 still to do. What our code should change:
+  - `ai::default_attrs` starts every computer tribe at `PREF_WARRIOR_PEOPLE` 20, `PREF_FIREWARRIOR_PEOPLE` 10,
+    `PREF_RELIGIOUS_PEOPLE` 10, `PREF_SPY_PEOPLE` 5. The original's live values, when the script doesn't set
+    them, are 0: red on level 1 never trains on its own and keeps 2 warriors for the whole level. This is the
+    "original is easier" gap. Start these at 0 (and re-check our other guessed defaults the same way: the only
+    unset non-zero value read live was `SPELL_DELAY` 12).
+  - `TRAIN_PEOPLE_NOW n kind` sends `n` idle braves; the script's 128-turn "no warrior → train 1" rule repeats
+    while the count is still 0 because a brave on its way or inside doesn't count, only a finished warrior. Count
+    the same way so a level-1 refill gives 2 warriors (measured twice), not 1.
+  - `MAX_TRAIN_AT_ONCE` 1: the second trainee waits outside until the first comes out.
+  - Time inside: 100 turns (human, measured 4 times) and 130-286 turns (computer); the spread isn't explained.
+    Blue's 4 trainees came out one at a time, 100 turns apart (see "Training huts" below).
+  - Crossing to red's island must not start a raid on level 1: the scripted raid needs > 2 red warriors, which
+    never happens. Only red's base defence (radius 7) reacts, sending its warrior and braves together.
+  - Killing red's shaman (no reincarnation on level 1) kills every red person the same turn and wins the level.
 - [x] A first native engine for the computer-controlled tribes (`game_core::ai`, pop3-rev-analysis.md
   "Native AI: how a computer-controlled tribe actually decides what to do"): `GameMap::tend_native_ai`
   runs, per computer tribe (one `NativeAi` per tribe `LevelHeader::ai_scripts` assigns a script to,
