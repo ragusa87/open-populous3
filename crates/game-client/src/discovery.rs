@@ -2,7 +2,8 @@
 //! pending discovery (`game_core::discovery`) flies from the vault to its panel button, from its start turn to the
 //! turn it lands. The exe counts drawn frames; ours spreads its frames over the flight's turns, on `SimNow`, so it
 //! stops while paused and arrives on the landing turn.
-//! A spell: its panel glyph flies to the middle of the view growing to 8× and turning, then onto its tile.
+//! A spell: its panel glyph flies to the middle of the view growing to 8× and turning, then onto its tile. A building:
+//! `discovery_building`.
 
 use crate::camera::{CameraRig, CurveParamsRes, GameCamera};
 use crate::grounded::ground_point;
@@ -146,27 +147,33 @@ fn spell_of(reward: Reward) -> Option<SpellKind> {
     }
 }
 
-/// Where the reward starts on screen: over the vault (its icon's height) when that is in view, else the middle
-/// of the side panel (the exe's falls back on a panel widget, which one untraced).
-fn start_point(d: &Discovery, map: &game_core::map::GameMap, rig: &CameraRig, params: &CurveParamsRes, cam: (&Camera, &GlobalTransform), window: Vec2) -> Vec2 {
-    let at = Vec2::new(d.from.0 as f32, d.from.1 as f32) / pop3_format::WORLD_UNITS_PER_CELL as f32;
-    let over = ground_point(&map.terrain, rig.focus, &params.0, at) + Vec3::Y * crate::vault_icon::ICON_CELLS;
-    cam.0
-        .world_to_viewport(cam.1, over)
-        .ok()
-        .filter(|p| p.x >= PANEL_WIDTH && p.x <= window.x && p.y >= 0.0 && p.y <= window.y)
-        .unwrap_or(Vec2::new(PANEL_WIDTH / 2.0, window.y / 2.0))
+/// Where a discovery's reward starts on screen (logical pixels): over the vault (its icon's height) when that is in
+/// view, else the middle of the side panel (the exe's falls back on a panel widget, which one untraced).
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct StartPoints<'w, 's> {
+    map: Res<'w, CurrentMap>,
+    rig: Res<'w, CameraRig>,
+    params: Res<'w, CurveParamsRes>,
+    camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<GameCamera>>,
 }
 
-#[allow(clippy::too_many_arguments)]
+impl StartPoints<'_, '_> {
+    pub fn of(&self, d: &Discovery) -> Option<Vec2> {
+        let (cam, cam_t) = self.camera.single().ok()?;
+        let size = cam.logical_viewport_size()?;
+        let at = Vec2::new(d.from.0 as f32, d.from.1 as f32) / pop3_format::WORLD_UNITS_PER_CELL as f32;
+        let over = ground_point(&self.map.0.terrain, self.rig.focus, &self.params.0, at) + Vec3::Y * crate::vault_icon::ICON_CELLS;
+        let seen = cam.world_to_viewport(cam_t, over).ok().filter(|p| p.x >= PANEL_WIDTH && p.x <= size.x && p.y >= 0.0 && p.y <= size.y);
+        Some(seen.unwrap_or(Vec2::new(PANEL_WIDTH / 2.0, size.y / 2.0)))
+    }
+}
+
 fn start_and_end(
     mut commands: Commands,
     map: Res<CurrentMap>,
     now: Res<SimNow>,
     flights: Query<(Entity, &Flight)>,
-    rig: Res<CameraRig>,
-    params: Res<CurveParamsRes>,
-    camera: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
+    starts: StartPoints,
     mut glyphs: crate::hud::spells::FlyingGlyphs,
     mut sounds: MessageWriter<crate::audio::PlaySound>,
 ) {
@@ -176,15 +183,13 @@ fn start_and_end(
             commands.entity(e).despawn();
         }
     }
-    let Ok(cam) = camera.single() else { return };
-    let Some(size) = cam.0.logical_viewport_size() else { return };
     for d in mine {
         if flights.iter().any(|(_, f)| d.granted == f.granted && d.reward == f.reward) {
             continue;
         }
         let Some(kind) = spell_of(d.reward) else { continue };
+        let Some(start) = starts.of(d) else { continue };
         let Some((image, color)) = glyphs.glyph(kind) else { continue };
-        let start = start_point(d, &map.0, &rig, &params, cam, size);
         commands.spawn((
             Flight { granted: d.granted, reward: d.reward, start },
             ImageNode::new(image).with_color(color),

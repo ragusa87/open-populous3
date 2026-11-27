@@ -202,7 +202,15 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   turn. A spell: its panel glyph from over the vault (the middle of the side panel when the vault is out of view)
   to the middle of the view, growing to 8× and turning (the exe's frames: 1 aim, 13 to the middle, 4 still), then
   onto its tile in 18 frames, speeding up ×1.5 a frame to a cap and spread over the distance (ours: the exe's runs
-  until it gets there); the Spells tab shown from then; sound 0x71 at the start. Dev: `DISCOVER=spell:<name>:<ticks>`.
+  until it gets there); the Spells tab shown from then; sound 0x71 at the start. A building (client
+  `discovery_building.rs`, drawn by its own orthographic camera over the game and the panel, unlit and two-sided): the
+  player's model of it (the original's, in raw model units, else the generated kit's in groups of triangles, at most
+  200), one piece per face, bursts out over the vault and flies to the middle growing (8 → 40), tilting from above
+  to nearly side on, its pieces tumbling out 700 units (19 frames); they fly back into place (23); the whole building
+  turns fast, slows and turns back (31); then the Build tab shows and its faces peel off in the order the turn
+  carries them past the front, each shrinking onto its tile in 10 frames (ours: 50 frames in all, the peeling spread
+  evenly from frame 12 to 40). Sounds 0xCC, 0xCB and 0xCE at the start (0xCE not stopped), 0xCD as it leaves for
+  the panel. Dev: `DISCOVER=spell:<name>:<ticks>`, `DISCOVER=building:<name>:<ticks>`.
 
 ## Open
 - `PrayTime`'s unit for a **vault** is confirmed (pop3-rev-analysis.md "The vault"): the same 4-turn tick as a

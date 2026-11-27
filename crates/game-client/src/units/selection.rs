@@ -276,7 +276,7 @@ pub(super) fn select_and_order(
     mut schedule: ResMut<super::GameSchedule>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cams: Query<(&Camera, &GlobalTransform), With<crate::camera::GameCamera>>,
     views: Query<(&UnitView, &GlobalTransform, &Visibility)>,
     ui: Query<&Interaction>,
     params: Res<CurveParamsRes>,

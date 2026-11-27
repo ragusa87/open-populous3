@@ -37,6 +37,12 @@ pub enum SoundCue {
     FlybyCancel,
     /// A discovered spell starts flying to the panel (`discopop`).
     DiscoverySpell,
+    /// A discovered building starts flying to the panel (`disco_bldg_pop`, `disco_bldg_path`, `disco_bldg_circ`), and
+    /// leaves for its tile (`disco_bldg_end`).
+    DiscoveryBuildingPop,
+    DiscoveryBuildingPath,
+    DiscoveryBuildingCircle,
+    DiscoveryBuildingEnd,
     // Selection and order voices.
     /// Followers (braves, warriors, firewarriors, wildmen) selected, by crowd size.
     FollowerBow(u8),
@@ -186,6 +192,10 @@ impl SoundCue {
             SoundCue::FlybyStart => 0x6F,
             SoundCue::FlybyCancel => 0x6E,
             SoundCue::DiscoverySpell => 0x71,
+            SoundCue::DiscoveryBuildingPop => 0xCC,
+            SoundCue::DiscoveryBuildingPath => 0xCB,
+            SoundCue::DiscoveryBuildingCircle => 0xCE,
+            SoundCue::DiscoveryBuildingEnd => 0xCD,
             SoundCue::FollowerBow(n) => crowd(n, [0x58, 0x43, 0x44, 0x45]),
             SoundCue::SpyBow(n) => crowd(n, [0x56, 0x46, 0x47, 0x48]),
             SoundCue::PreacherBow(n) => crowd(n, [0x57, 0x49, 0x4A, 0x4B]),

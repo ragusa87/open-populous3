@@ -221,7 +221,8 @@ pub struct OverlayCamera;
 
 pub(crate) fn spawn_camera(mut commands: Commands) {
     commands.spawn((GameCamera, Camera3d::default(), IsDefaultUiCamera, Transform::default()));
-    commands.spawn((OverlayCamera, Camera2d, Camera { order: 1, clear_color: ClearColorConfig::None, ..default() }));
+    crate::discovery_building::spawn_camera(&mut commands);
+    commands.spawn((OverlayCamera, Camera2d, Camera { order: 2, clear_color: ClearColorConfig::None, ..default() }));
     commands.insert_resource(ClearColor(SKY));
     commands.insert_resource(GlobalAmbientLight { brightness: 60.0, ..default() });
     commands.spawn((
@@ -325,7 +326,7 @@ fn apply_rig(
     rig: Res<CameraRig>,
     map: Res<CurrentMap>,
     params: Res<CurveParamsRes>,
-    mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+    mut cam: Query<(&mut Transform, &mut Projection), With<GameCamera>>,
     mut top: Local<Option<(u32, u16)>>,
 ) {
     let terrain = &map.0.terrain;

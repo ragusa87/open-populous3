@@ -203,6 +203,22 @@ struct BuildInfo;
 
 pub struct BuildPlugin;
 
+/// Where each building's tile is on screen (`discovery_building`).
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct BuildTiles<'w, 's> {
+    tiles: Query<'w, 's, (&'static BuildTile, &'static UiGlobalTransform, &'static ComputedNode)>,
+}
+
+impl BuildTiles<'_, '_> {
+    /// The centre of `kind`'s tile (any hut: the hut's), logical pixels, once laid out.
+    pub fn centre(&self, kind: BuildingKind) -> Option<Vec2> {
+        let same = |c: &Cell| matches!((c, kind), (Cell::Building(BuildingKind::Hut { .. }), BuildingKind::Hut { .. })) || *c == Cell::Building(kind);
+        let i = LAYOUT.iter().flatten().position(same)?;
+        let (_, at, node) = self.tiles.iter().find(|(t, _, n)| t.0 == i && n.size() != Vec2::ZERO)?;
+        Some(at.translation * node.inverse_scale_factor())
+    }
+}
+
 impl Plugin for BuildPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_tab).add_systems(Update, ((tile_clicks, look_at_next).in_set(crate::menu::Gameplay), update_tiles, update_info).chain());
