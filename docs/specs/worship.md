@@ -210,7 +210,12 @@ Angel of Death (the winged death totem); 6, 8, 2 units; the shaman; 4 units (`ma
   turns fast, slows and turns back (31); then the Build tab shows and its faces peel off in the order the turn
   carries them past the front, each shrinking onto its tile in 10 frames (ours: 50 frames in all, the peeling spread
   evenly from frame 12 to 40). Sounds 0xCC, 0xCB and 0xCE at the start (0xCE not stopped), 0xCD as it leaves for
-  the panel. Dev: `DISCOVER=spell:<name>:<ticks>`, `DISCOVER=building:<name>:<ticks>`.
+  the panel. Both (client `discovery_sparkles.rs`, on the cinematic's frames): a burst of 200 sparks where the reward
+  starts (hfx 1294-1299, one in 16 hfx 1288-1293, each tinted a random tribe's colour, 14-43 pixels a frame within
+  45° of a heading, 10 gone a frame; the heading is ours: towards the middle of the view; no trails), and the
+  twinkle (hfx 1288-1293) on the tile from 4 (spell) or 16 (building) frames into the flight to the panel, 100
+  frames long, past the landing; without the original files a star of ours for both. Dev:
+  `DISCOVER=spell:<name>:<ticks>`, `DISCOVER=building:<name>:<ticks>`.
 
 ## Open
 - `PrayTime`'s unit for a **vault** is confirmed (pop3-rev-analysis.md "The vault"): the same 4-turn tick as a

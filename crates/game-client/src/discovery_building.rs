@@ -28,6 +28,8 @@ const ASSEMBLE: u32 = 23;
 const SHOW: u32 = 31;
 const TO_PANEL: u32 = 50;
 pub const BUILDING_FRAMES: u32 = OUT + ASSEMBLE + SHOW + TO_PANEL;
+/// The twinkle on the tile starts 16 frames into the flight to the panel [exe].
+pub const TWINKLE_FROM: u32 = OUT + ASSEMBLE + SHOW + 16;
 /// Into the flight to the panel: the whole building first, faces peeling until `PEEL_END`, each flying `FACE_FLIGHT`
 /// [exe: from frame 12, 10 frames each; ours: spread evenly over the frames left].
 const PEEL_FROM: u32 = 12;

@@ -24,6 +24,8 @@ const SPELL_TO_MIDDLE: u32 = 13;
 const SPELL_PAUSE: u32 = 4;
 const SPELL_TO_PANEL: u32 = 18;
 pub const SPELL_FRAMES: u32 = SPELL_AIM + SPELL_TO_MIDDLE + SPELL_PAUSE + SPELL_TO_PANEL;
+/// The twinkle on the tile starts 4 frames into the flight to the panel [exe].
+pub const TWINKLE_FROM: u32 = SPELL_AIM + SPELL_TO_MIDDLE + SPELL_PAUSE + 4;
 /// Scales in 32nds [exe]: at the start and on the button, and in the middle.
 const SMALL: f32 = 52.0;
 const LARGE: f32 = 256.0;
