@@ -27,6 +27,10 @@ pub enum SoundCue {
     // The interface.
     /// A menu entry picked (`confirm`).
     Click,
+    /// A building plan placed, refused, turned (`bldgstmp`, `wrong`, `rotate`).
+    PlanPlaced,
+    PlanRefused,
+    PlanTurned,
     /// An intro flyby starts.
     FlybyStart,
     /// The player cancels a flyby.
@@ -174,6 +178,9 @@ impl SoundCue {
         let crowd = |n: u8, ids: [u8; 4]| ids[(n.clamp(1, 4) - 1) as usize];
         match self {
             SoundCue::Click => 0x6A,
+            SoundCue::PlanPlaced => 0x24,
+            SoundCue::PlanRefused => 0x25,
+            SoundCue::PlanTurned => 0x26,
             SoundCue::FlybyStart => 0x6F,
             SoundCue::FlybyCancel => 0x6E,
             SoundCue::FollowerBow(n) => crowd(n, [0x58, 0x43, 0x44, 0x45]),

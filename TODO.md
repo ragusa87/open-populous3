@@ -612,7 +612,7 @@ vertical, drag 2) apply to `physics::step` directly, no conversion needed.** Ord
 - [x] Convert (`game_core::convert`, spells.md) to the original (pop3-rev-analysis.md "Convert wild"): life 18/22 reset by each conversion, first try on turn 2, the 5 × 5 / 7 × 7 square, nearest on an all-land cell, coast wildmen stepping inland to wait, the sparkle ring (`convert_ring.rs`). Left: a tribe that "gives up and sulks" ending it (no such tribe state yet); the new person's own id (also the site levelling's); the conversion flash (7/0x3A, 8 turns, also the levelling's and a preacher's) - **question for a spec session**: its look (sprite/animation, size, where it stands) is not in the docs.
 
 ### Buildings ([buildings.md](docs/specs/buildings.md))
-- [ ] Holding a plan as the original: a plain left click places it and stops holding it, Ctrl or Alt + click places it and keeps it (walls stay held anyway), a refused spot plays the error sound and keeps it, right click or Esc puts it away (pop3-rev-analysis.md "Holding a building plan").
+- [x] Holding a plan as the original (pop3-rev-analysis.md "Holding a building plan"): Ctrl/Alt keeps it, walls stay held, refused spots buzz, Esc puts it away (`blueprint.rs`). Left: Shift + right click removing a plan of the player's under the cursor; the guard post's own marks.
 - [ ] Spacing between buildings (buildings.md "Blueprint", `placement::walls_touch`): a new building's walls may not
   share a side with another's, read off the original levels' layouts, not traced. Spec question: the original's own
   placement rule (the per-type shape mask's ring bit 0x4, pop3-rev-analysis.md "The queue at the door", is a candidate), and

@@ -215,11 +215,20 @@ pub(crate) fn ground_under_mouse(
     pick_ground(&map.0.terrain, rig.focus, &params.0, ray.origin, *ray.direction)
 }
 
-/// Space turns it, right click on the map puts it away; left click on the map lights a camp fire or
-/// places a building plan with the selected braves sent to it, and puts it away.
+/// Whether a building plan is still held after placing one (pop3-rev-analysis.md "Holding a building plan" [exe]):
+/// with Ctrl or Alt held, or always for a wall.
+pub fn keeps_holding(kind: BuildingKind, ctrl_or_alt: bool) -> bool {
+    ctrl_or_alt || kind == BuildingKind::WallPiece
+}
+
+/// As the original's plan-held input (pop3-rev-analysis.md "Holding a building plan" [exe]): Space turns it, right
+/// click on the map or Esc puts it away; left click on the map lights a camp fire or places a building plan with
+/// the selected braves sent to it, and puts it away unless `keeps_holding`; a refused spot buzzes and keeps it.
 #[allow(clippy::too_many_arguments)]
 fn blueprint_input(
     keys: crate::keymap::Shortcuts,
+    codes: Res<ButtonInput<KeyCode>>,
+    mut sounds: MessageWriter<crate::audio::PlaySound>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     ui: Query<&Interaction>,
@@ -236,17 +245,26 @@ fn blueprint_input(
     }
     if keys.just_pressed(crate::keymap::Shortcut::TurnPlan) {
         blueprint.turn();
+        sounds.write(crate::audio::PlaySound::flat(crate::audio::SoundCue::PlanTurned));
     }
-    if mouse.just_pressed(MouseButton::Right) && cursor_on_map(&windows, &ui).is_some() {
+    if (mouse.just_pressed(MouseButton::Right) && cursor_on_map(&windows, &ui).is_some()) || codes.just_pressed(KeyCode::Escape) {
         blueprint.put_away();
+        return;
     }
     if let (Some(Plan::Building(kind)), true) = (blueprint.plan, mouse.just_pressed(MouseButton::Left)) {
         let Some(cell) = ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params) else { return };
-        let Some(place) = place_command(&map.0, kind, blueprint.facing, cell) else { return };
+        let Some(place) = place_command(&map.0, kind, blueprint.facing, cell) else {
+            sounds.write(crate::audio::PlaySound::flat(crate::audio::SoundCue::PlanRefused));
+            return;
+        };
         let orders = map.0.place_orders(&place, &selection.units);
         schedule.issue(place);
         orders.into_iter().for_each(|c| schedule.issue(c));
-        blueprint.put_away();
+        sounds.write(crate::audio::PlaySound::flat(crate::audio::SoundCue::PlanPlaced));
+        let modifier = codes.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::AltLeft, KeyCode::AltRight]);
+        if !keeps_holding(kind, modifier) {
+            blueprint.put_away();
+        }
     }
     if blueprint.plan == Some(Plan::Campfire) && mouse.just_pressed(MouseButton::Left) {
         let Some(cell) = ground_under_mouse(&windows, &ui, &cams, &map, &rig, &params).map(campfire_cell) else { return };
@@ -481,5 +499,13 @@ mod tests {
         assert_eq!(b.facing, 2, "the turn is kept");
         b.put_away();
         assert!(!b.is_active());
+    }
+
+    #[test]
+    fn a_plan_is_kept_with_ctrl_or_alt_and_a_wall_always() {
+        let hut = BuildingKind::Hut { size: 1 };
+        assert!(!keeps_holding(hut, false));
+        assert!(keeps_holding(hut, true));
+        assert!(keeps_holding(BuildingKind::WallPiece, false));
     }
 }

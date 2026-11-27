@@ -478,12 +478,16 @@ pub fn paused_page(target: &LoadTarget) -> Page {
 
 /// Esc in the game (not taken by an open HUD menu): pause and free the mouse.
 pub(crate) fn pause_on_escape(
+    blueprint: Res<crate::blueprint::Blueprint>,
     target: Res<LoadTarget>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut nav: ResMut<MenuNav>,
     mut cursor: ResMut<VirtualCursor>,
     mut state: ResMut<NextState<AppState>>,
 ) {
+    if blueprint.is_active() || blueprint.is_changed() {
+        return;
+    }
     if keys.clear_just_pressed(KeyCode::Escape) {
         *nav = MenuNav::at(paused_page(&target));
         cursor.request = Some(false);

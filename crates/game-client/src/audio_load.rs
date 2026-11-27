@@ -19,7 +19,7 @@ const SFX_FILE: &str = "Soundd2.sdt";
 pub fn cues() -> Vec<SoundCue> {
     use SoundCue::*;
     let mut cues = vec![
-        Click, FlybyStart, FlybyCancel, ShamanSelect, FollowerOk, ShamanYes, Death, ShamanDie, EnemyShamanDie, GhostDie, Drown, IntoAir, IntoWind,
+        Click, PlanPlaced, PlanRefused, PlanTurned, FlybyStart, FlybyCancel, ShamanSelect, FollowerOk, ShamanYes, Death, ShamanDie, EnemyShamanDie, GhostDie, Drown, IntoAir, IntoWind,
         ShamanScream, EnemyShamanScream, Land, ShamanLand, OnFire, Converted, Invisible, InvisibleOff, Mutter, Chop, ChopPickUp, Hammer, Stomp, Eat,
         WildEat, Drink, WildDrink, BuildingDone, Whoosh, BlastImpact, Thunder, Splash, Wind, Swarm, Swamp, ErodeRumble, QuakeRumble, QuakeCrack,
         VolcanoRumble, VolcanoRise, Lava, GroundFire, FireCatches, BuildingFire, WoodCrack, BranchSnap, BridgeCast, BridgeCast2, HypnotismCast,

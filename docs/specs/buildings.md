@@ -147,9 +147,10 @@ available, is the camp fire (see "Camp fire").
 - A left click on a valid spot places it (`Command::PlaceBuilding { player, kind, x, z, facing, braves }`): the
   blueprint stays drawn on the ground as a construction site, a `Building` with a `stage` (Blueprint / Under
   construction / Built / Dismantling) and its wood counts. A size-0 tree under it stays invisible and does not grow back while covered.
-- [exe] In the original a plain click stops holding the plan; Ctrl or Alt + click keeps it for another (walls stay
-  held anyway); a refused spot plays the error sound and keeps it; right click or Esc puts it away
-  (pop3-rev-analysis.md "Holding a building plan").
+- As the original (pop3-rev-analysis.md "Holding a building plan" [exe]; `blueprint::keeps_holding`): a plain click
+  places it and stops holding the plan; Ctrl or Alt + click keeps it for another (walls stay held anyway); a
+  refused spot plays the "wrong" buzz (0x25) and keeps it; a placed one the stamp (0x24), a turn (Space) its sound
+  (0x26); right click or Esc puts it away (Esc then does not pause the game).
 - The braves selected when placing are assigned to it. Later, selecting braves and clicking the site assigns them
   (`Command::Assign { player, site, units }`).
 - A site needs at least one assigned brave to progress (none: it just waits); each kind has only a maximum. More
