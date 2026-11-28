@@ -1,6 +1,6 @@
 //! Build tab: a 2 x 5 grid as the original's panel (`LAYOUT`): huts and towers, warrior and preacher (temple), spy and
-//! firewarrior, boat and airship huts, the camp fire. A tile is the building's icon (the original's teal one when
-//! allowed, its name otherwise), described on hover. Left click on an available one picks it as the blueprint
+//! firewarrior, boat and airship huts, the camp fire. A tile is the building's picture (the original's, its name without
+//! the original files), described on hover. Left click on an available one picks it as the blueprint
 //! (`crate::blueprint`, white border while picked); with people selected and Shift held, sends them into the player's
 //! buildings of that kind (`GameMap::send_into`); right click looks at the player's next building of that kind, one
 //! after the other.
@@ -34,20 +34,29 @@ pub const LAYOUT: [[Cell; 2]; 5] = {
     ]
 };
 
-/// The panel's building icons in `hfx0-0.dat`, in the order of the cursor's (hut, drum tower, warrior, firewarrior,
-/// temple, spy, boat hut, airship hut, camp fire): the icons themselves (white, drawn in dark ink), their shadows,
-/// their highlights.
-pub const ICONS: usize = 1075;
-pub const SHADOWS: usize = 1037;
-pub const HIGHLIGHTS: usize = 1046;
-/// The "?" of plans to discover (`hfx0-0.dat`).
+/// The panel's building pictures in `hfx0-0.dat`, 9 each in panel order (`LAYOUT`: hut, drum tower, warrior,
+/// temple, spy, firewarrior, boat hut, airship hut, camp fire), all drawn untinted (pop3-rev-analysis.md "Build
+/// panel building buttons"): the dark carved one of an available building, its bright one while hovered or
+/// pressed, the all-gold one of a building to discover (under the "?").
+pub const PICTURES: usize = 1028;
+pub const DISCOVERABLE_PICTURES: usize = 1037;
+pub const HOVERED_PICTURES: usize = 1046;
+/// The "?" of plans to discover (`hfx0-0.dat`), drawn over the gold picture.
 pub const UNKNOWN_ICON: usize = 1055;
 
 /// A tile's picture (sprite indices in `hfx0-0.dat`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileIcon {
-    Building { icon: usize, shadow: usize, highlight: usize },
-    Unknown,
+    /// Available: `idle`, `hovered` while hovered or pressed.
+    Building { idle: usize, hovered: usize },
+    /// To discover: `picture` with the "?" (`UNKNOWN_ICON`) over it.
+    Discoverable { picture: usize },
+}
+
+/// A cell's place among the panel's 9 buttons (`LAYOUT` order, the empty cell left out): the `k` of its pictures.
+fn panel_index(cell: Cell) -> Option<usize> {
+    let same = |c: &Cell| matches!((*c, cell), (Cell::Building(BuildingKind::Hut { .. }), Cell::Building(BuildingKind::Hut { .. }))) || *c == cell;
+    (cell != Cell::Empty).then(|| LAYOUT.iter().flatten().filter(|c| **c != Cell::Empty).position(same)).flatten()
 }
 
 /// A tile of the tab: a building of the book, the camp fire, or an empty cell.
@@ -85,15 +94,20 @@ impl Tile {
         }
     }
 
-    /// Its icon on the panel (`hfx0-0.dat`): the building's, in the cursor's order (`virtual_cursor::plan_sprite`,
-    /// `POINT0-0.DAT` 58-66): the original's icon (`ICONS`) and shadow (`SHADOWS`), and its highlight (`HIGHLIGHTS`),
-    /// which the tab draws (black, white on hover); the "?" of plans to discover. None for an empty or hidden cell.
+    /// Its pictures on the panel (`hfx0-0.dat`, as the original's: pop3-rev-analysis.md "Build panel building
+    /// buttons"). None for an empty or hidden cell.
     pub fn icon(&self) -> Option<TileIcon> {
-        if self.view().unknown {
-            return Some(TileIcon::Unknown);
-        }
-        let k = self.plan().and_then(crate::virtual_cursor::plan_sprite)? - *pop3_format::sprites::POINTER_BUILDING_ICONS.start();
-        Some(TileIcon::Building { icon: ICONS + k, shadow: SHADOWS + k, highlight: HIGHLIGHTS + k })
+        let view = self.view();
+        let cell = match self {
+            Tile::Slot(s) => Cell::Building(s.kind),
+            Tile::Campfire => Cell::Campfire,
+            Tile::Empty => Cell::Empty,
+        };
+        let k = panel_index(cell).filter(|_| view.shown)?;
+        Some(match view.unknown {
+            true => TileIcon::Discoverable { picture: DISCOVERABLE_PICTURES + k },
+            false => TileIcon::Building { idle: PICTURES + k, hovered: HOVERED_PICTURES + k },
+        })
     }
 
     pub fn describe(&self) -> String {
@@ -195,8 +209,9 @@ struct BuildTile(usize);
 struct BuildLabel(usize);
 #[derive(Component)]
 struct BuildIcon(usize);
+/// The "?" drawn over a building to discover.
 #[derive(Component)]
-struct BuildShadow(usize);
+struct BuildMark(usize);
 #[derive(Component)]
 struct BuildInfo;
 
@@ -239,8 +254,8 @@ fn spawn_tab(mut commands: Commands, tabs: Query<(Entity, &TabContent)>) {
                         BorderColor::all(Color::NONE),
                     ))
                     .with_children(|tile| {
-                        tile.spawn((BuildShadow(i), ImageNode::default(), Node { display: Display::None, position_type: PositionType::Absolute, height: px(44), ..default() }));
                         tile.spawn((BuildIcon(i), ImageNode::default(), Node { display: Display::None, height: px(44), ..default() }));
+                        tile.spawn((BuildMark(i), ImageNode::default(), Node { display: Display::None, position_type: PositionType::Absolute, height: px(30), ..default() }));
                         tile.spawn((BuildLabel(i), Text::new(""), TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(INK), TextLayout::justify(Justify::Center)));
                     });
                 }
@@ -301,24 +316,21 @@ fn update_tiles(
     blueprint: Res<crate::blueprint::Blueprint>,
     (mut icons, mut images): (ResMut<crate::tooltip::IconImages>, ResMut<Assets<Image>>),
     mut tiles: Query<(&BuildTile, &Interaction, &mut BackgroundColor, &mut BorderColor)>,
-    mut labels: Query<(&BuildLabel, &mut Text, &mut TextFont, &mut Node), (Without<BuildIcon>, Without<BuildShadow>)>,
-    mut pictures: Query<(&BuildIcon, &mut ImageNode, &mut Node), (Without<BuildLabel>, Without<BuildShadow>)>,
-    mut shadows: Query<(&BuildShadow, &mut ImageNode, &mut Node), (Without<BuildLabel>, Without<BuildIcon>)>,
+    mut labels: Query<(&BuildLabel, &mut Text, &mut TextFont, &mut Node), (Without<BuildIcon>, Without<BuildMark>)>,
+    mut pictures: Query<(&BuildIcon, &mut ImageNode, &mut Node), (Without<BuildLabel>, Without<BuildMark>)>,
+    mut marks: Query<(&BuildMark, &mut ImageNode, &mut Node), (Without<BuildLabel>, Without<BuildIcon>)>,
 ) {
     let all = self::tiles(player_builds(&map.0));
     let views: Vec<BuildTileView> = all.iter().map(Tile::view).collect();
     let hovered: Vec<usize> = tiles.iter().filter(|(_, i, ..)| **i != Interaction::None).map(|(t, ..)| t.0).collect();
-    // What each tile draws: the icon (dark, or its highlight when hovered) and its shadow; the "?" alone.
-    let mut drawn: Vec<Option<(Handle<Image>, Color, Option<Handle<Image>>)>> = Vec::new();
+    // What each tile draws, untinted: its picture (the bright one while hovered), and the "?" over a building to
+    // discover. Without the original files, nothing: the label instead.
+    let mut drawn: Vec<Option<(Handle<Image>, Option<Handle<Image>>)>> = Vec::new();
     for (i, tile) in all.iter().enumerate() {
         let mut sprite = |index: usize| icons.sprite(index, &mut images).map(|s| s.0);
         drawn.push(match tile.icon() {
-            // The highlight, white when hovered, black otherwise: it reads better than the dark icons on the panel.
-            Some(TileIcon::Building { highlight, .. }) => match hovered.contains(&i) {
-                true => sprite(highlight).map(|h| (h, Color::WHITE, None)),
-                false => sprite(highlight).map(|h| (h, Color::BLACK, None)),
-            },
-            Some(TileIcon::Unknown) => sprite(UNKNOWN_ICON).map(|h| (h, Color::WHITE, None)),
+            Some(TileIcon::Building { idle, hovered: bright }) => sprite(if hovered.contains(&i) { bright } else { idle }).map(|h| (h, None)),
+            Some(TileIcon::Discoverable { picture }) => sprite(picture).and_then(|h| Some((h, Some(sprite(UNKNOWN_ICON)?)))),
             None => None,
         });
     }
@@ -346,12 +358,12 @@ fn update_tiles(
     for (pic, mut image, mut node) in &mut pictures {
         let d = drawn.get(pic.0).cloned().flatten();
         show(&mut node, d.is_some());
-        if let Some((h, ink, _)) = d.filter(|(h, ink, _)| image.image != *h || image.color != *ink) {
-            (image.image, image.color) = (h, ink);
+        if let Some((h, _)) = d.filter(|(h, _)| image.image != *h) {
+            image.image = h;
         }
     }
-    for (shadow, mut image, mut node) in &mut shadows {
-        let d = drawn.get(shadow.0).cloned().flatten().and_then(|d| d.2);
+    for (mark, mut image, mut node) in &mut marks {
+        let d = drawn.get(mark.0).cloned().flatten().and_then(|d| d.1);
         show(&mut node, d.is_some());
         if let Some(h) = d.filter(|h| image.image != *h) {
             image.image = h;
@@ -405,10 +417,14 @@ mod tests {
         assert_eq!(all[8..], [Tile::Campfire, Tile::Empty]);
         assert_eq!((Tile::Campfire.plan(), Tile::Empty.plan()), (Some(Plan::Campfire), None));
         assert_eq!(Tile::Empty.destination(), None);
-        assert_eq!(all[0].icon(), Some(TileIcon::Building { icon: 1075, shadow: 1037, highlight: 1046 }), "the hut's");
-        assert_eq!(Tile::Campfire.icon(), Some(TileIcon::Building { icon: 1083, shadow: 1045, highlight: 1054 }), "the camp fire's, last");
+        assert_eq!(all[0].icon(), Some(TileIcon::Building { idle: 1028, hovered: 1046 }), "the hut's");
+        assert_eq!(all[3].icon(), Some(TileIcon::Building { idle: 1031, hovered: 1049 }), "the temple's, in panel order");
+        assert_eq!(all[5].icon(), Some(TileIcon::Building { idle: 1033, hovered: 1051 }), "the firewarrior hut's");
+        assert_eq!(Tile::Campfire.icon(), Some(TileIcon::Building { idle: 1036, hovered: 1054 }), "the camp fire's, last");
+        assert_eq!(Tile::Slot(slot(BuildingKind::Hut { size: 3 }, BuildAvailability::Available)).icon(), all[0].icon(), "any hut");
         assert_eq!(Tile::Empty.icon(), None);
-        assert_eq!(Tile::Slot(slot(BuildingKind::Temple, BuildAvailability::Discoverable)).icon(), Some(TileIcon::Unknown));
+        assert_eq!(Tile::Slot(slot(BuildingKind::Temple, BuildAvailability::Hidden)).icon(), None);
+        assert_eq!(Tile::Slot(slot(BuildingKind::Temple, BuildAvailability::Discoverable)).icon(), Some(TileIcon::Discoverable { picture: 1040 }), "gold, under the \"?\"");
     }
 
     #[test]
